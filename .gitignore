@@ -34,3 +34,28 @@ htmlcov/
 
 # Logs
 *.log
+
+# PyInstaller
+*.spec
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# OpenCV captures and media outputs
+captures/
+output/
+temp/
+*.mp4
+*.avi
+*.mkv
+
+# Linters and formatters
+.ruff_cache/
+.tox/
+
+# Local databases
+*.db
+*.sqlite3

@@ -1,0 +1,12 @@
+[project]
+name = "glasscv"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mss>=10.2.0",
+    "numpy>=2.4.5",
+    "opencv-python>=4.13.0.92",
+    "pyqt6>=6.11.0",
+]
