@@ -46,15 +46,25 @@ class GlassWindow(QWidget):
 
     def set_click_through(self, state: bool):
         """Enables or disables mouse interaction with this window."""
-        self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, state)
         if state:
             self.border_color = QColor(255, 0, 0) # Red when pinned
         else:
             self.border_color = QColor(0, 255, 0) # Green when movable
             
-        # When changing WindowFlags in PyQt6 it is sometimes necessary to hide and show the window
-        self.hide()
-        self.show()
+        if sys.platform == "win32":
+            hwnd = int(self.winId())
+            GWL_EXSTYLE = -20
+            WS_EX_TRANSPARENT = 0x20
+            ex_style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+            if state:
+                ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT)
+            else:
+                ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_TRANSPARENT)
+        else:
+            self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, state)
+            self.hide()
+            self.show()
+
         self.update()
 
     def set_mirror_mode(self, state: bool):
