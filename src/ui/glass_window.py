@@ -1,6 +1,6 @@
 import sys
 import ctypes
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QApplication
+from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QApplication, QSizePolicy
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap
 
@@ -34,6 +34,7 @@ class GlassWindow(QWidget):
         self.mirror_mode = False
         self.image_label = QLabel(self)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.image_label.hide()
         
         layout = QVBoxLayout(self)
@@ -68,12 +69,14 @@ class GlassWindow(QWidget):
     def update_image(self, qimg):
         """If mirror mode is active, updates the image to display."""
         if self.mirror_mode:
-            pixmap = QPixmap.fromImage(qimg)
-            self.image_label.setPixmap(pixmap.scaled(
-                self.image_label.size(), 
-                Qt.AspectRatioMode.KeepAspectRatio, 
-                Qt.TransformationMode.FastTransformation
-            ))
+            size = self.image_label.size()
+            if size.width() > 0 and size.height() > 0:
+                pixmap = QPixmap.fromImage(qimg)
+                self.image_label.setPixmap(pixmap.scaled(
+                    size, 
+                    Qt.AspectRatioMode.KeepAspectRatio, 
+                    Qt.TransformationMode.FastTransformation
+                ))
 
     def paintEvent(self, event):
         """Draws the border of the capture window."""
@@ -152,10 +155,17 @@ class GlassWindow(QWidget):
             elif "bottom" in self._resize_edge:
                 h += delta.y()
                 
-            # Minimum constraints
-            if w > 50 and h > 50:
-                self.setGeometry(x, y, w, h)
-                self.emit_geometry()
+            if w < 50:
+                if "left" in self._resize_edge:
+                    x -= (50 - w)
+                w = 50
+            if h < 50:
+                if "top" in self._resize_edge:
+                    y -= (50 - h)
+                h = 50
+                
+            self.setGeometry(x, y, w, h)
+            self.emit_geometry()
                 
         else:
             # Change the cursor depending on the edge
