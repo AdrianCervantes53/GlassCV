@@ -50,6 +50,7 @@ class GlassCV:
         # --- Control Window -> Glass Window ---
         self.control.glass_pinned.connect(self.glass.set_click_through)
         self.control.mirror_mode_changed.connect(self.glass.set_mirror_mode)
+        self.control.border_toggled.connect(self.glass.set_show_border)
         
         # --- Control Window -> File System ---
         self.control.save_requested.connect(self.control.save_current_pixmap)

@@ -27,8 +27,9 @@ class GlassWindow(QWidget):
         self._drag_start_position = QPoint()
         self._window_start_geometry = QRect()
         
-        self.border_width = 5
-        self.border_color = QColor(0, 255, 0) # Opaque green, colorkey doesn't support alpha
+        self.border_width = 2
+        self.border_color = QColor(70, 180, 70) # Softer green (colorkey doesn't support true alpha)
+        self.show_border = True
         
         # Label for mirror mode
         self.mirror_mode = False
@@ -47,9 +48,9 @@ class GlassWindow(QWidget):
     def set_click_through(self, state: bool):
         """Enables or disables mouse interaction with this window."""
         if state:
-            self.border_color = QColor(255, 0, 0) # Red when pinned
+            self.border_color = QColor(180, 70, 70) # Softer red when pinned
         else:
-            self.border_color = QColor(0, 255, 0) # Green when movable
+            self.border_color = QColor(70, 180, 70) # Softer green when movable
             
         if sys.platform == "win32":
             hwnd = int(self.winId())
@@ -65,6 +66,11 @@ class GlassWindow(QWidget):
             self.hide()
             self.show()
 
+        self.update()
+
+    def set_show_border(self, state: bool):
+        """Shows or hides the border of the glass window."""
+        self.show_border = state
         self.update()
 
     def set_mirror_mode(self, state: bool):
@@ -95,18 +101,19 @@ class GlassWindow(QWidget):
         # Fill with Magenta (this will be the transparent colorkey)
         painter.fillRect(self.rect(), QColor(255, 0, 255))
         
-        # Draw border
-        pen = QPen(self.border_color, self.border_width)
-        # Use square cap and miter join for clean border corners
-        pen.setCapStyle(Qt.PenCapStyle.SquareCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-        painter.setPen(pen)
-        
-        # Adjust the rect so the border is drawn completely inside the widget
-        rect = self.rect()
-        offset = self.border_width // 2
-        rect.adjust(offset, offset, -offset, -offset)
-        painter.drawRect(rect)
+        if self.show_border:
+            # Draw border
+            pen = QPen(self.border_color, self.border_width)
+            # Use square cap and miter join for clean border corners
+            pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            painter.setPen(pen)
+            
+            # Adjust the rect so the border is drawn completely inside the widget
+            rect = self.rect()
+            offset = self.border_width // 2
+            rect.adjust(offset, offset, -offset, -offset)
+            painter.drawRect(rect)
 
     # --- Movement and resizing logic ---
     

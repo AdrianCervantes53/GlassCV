@@ -14,6 +14,7 @@ class ControlWindow(QWidget):
     glass_pinned = pyqtSignal(bool)
     mirror_mode_changed = pyqtSignal(bool)
     save_requested = pyqtSignal(str)
+    border_toggled = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -80,9 +81,14 @@ class ControlWindow(QWidget):
         
         self.chk_mirror = QCheckBox("Mirror on Glass")
         self.chk_mirror.toggled.connect(self.mirror_mode_changed.emit)
+
+        self.chk_border = QCheckBox("Show Border")
+        self.chk_border.setChecked(True)
+        self.chk_border.toggled.connect(self.border_toggled.emit)
         
         glass_layout.addWidget(self.chk_pin)
         glass_layout.addWidget(self.chk_mirror)
+        glass_layout.addWidget(self.chk_border)
         group_glass.setLayout(glass_layout)
         controls_layout.addWidget(group_glass)
 
