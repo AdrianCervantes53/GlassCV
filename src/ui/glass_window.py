@@ -27,7 +27,7 @@ class GlassWindow(QWidget):
         self._drag_start_position = QPoint()
         self._window_start_geometry = QRect()
         
-        self.border_width = 2
+        self.border_width = 4
         self.border_color = QColor(70, 180, 70) # Softer green (colorkey doesn't support true alpha)
         self.show_border = True
         
