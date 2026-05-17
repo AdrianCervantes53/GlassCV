@@ -10,18 +10,18 @@ class GlassWindow(QWidget):
         super().__init__()
         self.setWindowTitle("GlassCV - Glass")
         
-        # Atributos iniciales de la ventana
+        # Initial window attributes
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | 
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool  # Ocultar de la barra de tareas
+            Qt.WindowType.Tool  # Hide from taskbar
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # Geometría inicial
+        # Initial geometry
         self.setGeometry(100, 100, 400, 300)
         
-        # Variables para movimiento y redimensionamiento manual
+        # Variables for manual movement and resizing
         self._is_moving = False
         self._is_resizing = False
         self._resize_edge = None
@@ -29,9 +29,9 @@ class GlassWindow(QWidget):
         self._window_start_geometry = QRect()
         
         self.border_width = 5
-        self.border_color = QColor(0, 255, 0, 200) # Verde semi-transparente
+        self.border_color = QColor(0, 255, 0, 200) # Semi-transparent green
         
-        # Label para el modo espejo
+        # Label for mirror mode
         self.mirror_mode = False
         self.image_label = QLabel(self)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -41,24 +41,24 @@ class GlassWindow(QWidget):
         layout.setContentsMargins(self.border_width, self.border_width, self.border_width, self.border_width)
         layout.addWidget(self.image_label)
         
-        # Para que detecte el mouse en los bordes sin hacer click
+        # To detect mouse on edges without clicking
         self.setMouseTracking(True)
 
     def set_click_through(self, state: bool):
-        """Activa o desactiva la interacción del mouse con esta ventana."""
+        """Enables or disables mouse interaction with this window."""
         self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, state)
         if state:
-            self.border_color = QColor(255, 0, 0, 200) # Rojo cuando está fijado
+            self.border_color = QColor(255, 0, 0, 200) # Red when pinned
         else:
-            self.border_color = QColor(0, 255, 0, 200) # Verde cuando se puede mover
+            self.border_color = QColor(0, 255, 0, 200) # Green when movable
             
-        # Al cambiar WindowFlags en PyQt6 a veces es necesario ocultar y mostrar la ventana
+        # When changing WindowFlags in PyQt6 it is sometimes necessary to hide and show the window
         self.hide()
         self.show()
         self.update()
 
     def set_mirror_mode(self, state: bool):
-        """Activa o desactiva el renderizado de la imagen procesada dentro del glass."""
+        """Enables or disables rendering of the processed image inside the glass."""
         self.mirror_mode = state
         if state:
             self.image_label.show()
@@ -67,7 +67,7 @@ class GlassWindow(QWidget):
             self.image_label.clear()
 
     def update_image(self, qimg):
-        """Si el modo espejo está activo, actualiza la imagen a mostrar."""
+        """If mirror mode is active, updates the image to display."""
         if self.mirror_mode:
             pixmap = QPixmap.fromImage(qimg)
             self.image_label.setPixmap(pixmap.scaled(
@@ -77,31 +77,31 @@ class GlassWindow(QWidget):
             ))
 
     def paintEvent(self, event):
-        """Dibuja el borde de la ventana de captura."""
+        """Draws the border of the capture window."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Rellenar con transparente
+        # Fill with transparent
         painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
         
-        # Dibujar borde
+        # Draw border
         pen = QPen(self.border_color, self.border_width)
         painter.setPen(pen)
         
-        # Ajustamos el rect para que el borde se dibuje por completo dentro del widget
+        # Adjust the rect so the border is drawn completely inside the widget
         rect = self.rect()
         offset = self.border_width // 2
         rect.adjust(offset, offset, -offset, -offset)
         painter.drawRect(rect)
 
-    # --- Lógica de movimiento y redimensionamiento ---
+    # --- Movement and resizing logic ---
     
     def get_resize_edge(self, pos: QPoint):
         x = pos.x()
         y = pos.y()
         w = self.width()
         h = self.height()
-        bw = self.border_width * 2 # Zona sensible más grande
+        bw = self.border_width * 2 # Larger sensitive area
 
         edge = []
         if y <= bw:
@@ -151,13 +151,13 @@ class GlassWindow(QWidget):
             elif "bottom" in self._resize_edge:
                 h += delta.y()
                 
-            # Restricciones mínimas
+            # Minimum constraints
             if w > 50 and h > 50:
                 self.setGeometry(x, y, w, h)
                 self.emit_geometry()
                 
         else:
-            # Cambiar el cursor dependiendo del borde
+            # Change the cursor depending on the edge
             edge = self.get_resize_edge(event.pos())
             if edge in ["left", "right"]:
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
@@ -178,7 +178,7 @@ class GlassWindow(QWidget):
             self.emit_geometry()
 
     def emit_geometry(self):
-        # Ajustamos el área de captura al interior del glass para no capturar el borde
+        # Adjust the capture area to the inside of the glass to not capture the border
         g = self.geometry()
         bw = self.border_width
         self.geometry_changed.emit(g.x() + bw, g.y() + bw, g.width() - 2*bw, g.height() - 2*bw)

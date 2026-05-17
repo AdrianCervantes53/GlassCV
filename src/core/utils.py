@@ -6,24 +6,24 @@ import numpy as np
 
 def enable_dpi_awareness():
     """
-    Habilita el modo DPI awareness en Windows para evitar 
-    que el escalado del sistema operativo distorsione las coordenadas de la pantalla.
-    Esto garantiza que la ventana Glass y la captura mss coincidan.
+    Enables DPI awareness mode in Windows to prevent 
+    OS scaling from distorting screen coordinates.
+    This ensures the Glass window and mss capture match.
     """
     if sys.platform == "win32":
         try:
             # PROCESS_PER_MONITOR_DPI_AWARE = 2
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except Exception as e:
-            print(f"No se pudo habilitar DPI Awareness vía shcore: {e}")
+            print(f"Could not enable DPI Awareness via shcore: {e}")
             try:
                 ctypes.windll.user32.SetProcessDPIAware()
             except Exception as e2:
-                print(f"No se pudo habilitar DPI Awareness vía user32: {e2}")
+                print(f"Could not enable DPI Awareness via user32: {e2}")
 
 def cv2_to_qimage(cv_img: np.ndarray) -> QImage:
-    """Convierte una imagen de OpenCV (numpy array) a QImage de PyQt6."""
-    # Verificamos los canales para manejar correctamente Grayscale, BGR o BGRA
+    """Converts an OpenCV image (numpy array) to a PyQt6 QImage."""
+    # Check the channels to properly handle Grayscale, BGR or BGRA
     if len(cv_img.shape) == 2:
         # Grayscale
         height, width = cv_img.shape

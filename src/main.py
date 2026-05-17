@@ -9,24 +9,24 @@ from ui.control_window import ControlWindow
 
 class GlassCVApp:
     def __init__(self):
-        # 1. Habilitar DPI Awareness antes de crear QApplication
+        # 1. Enable DPI Awareness before creating QApplication
         enable_dpi_awareness()
         
         self.app = QApplication(sys.argv)
         self.app.setStyle("Fusion")
         
-        # 2. Instanciar Lógica
+        # 2. Instantiate Logic
         self.processor = ImageProcessor()
         self.capture_thread = CaptureThread(self.processor)
         
-        # 3. Instanciar UI
+        # 3. Instantiate UI
         self.glass = GlassWindow()
         self.control = ControlWindow()
         
-        # 4. Conectar Señales
+        # 4. Connect Signals
         self._connect_signals()
         
-        # 5. Iniciar Hilos y Mostrar Ventanas
+        # 5. Start Threads and Show Windows
         self.glass.show()
         self.control.show()
         self.capture_thread.start()
@@ -36,7 +36,7 @@ class GlassCVApp:
         self.glass.geometry_changed.connect(self.capture_thread.update_region)
         
         # --- Capture Thread -> UI ---
-        # El hilo emite un numpy array (frame procesado)
+        # The thread emits a numpy array (processed frame)
         self.capture_thread.frame_ready.connect(self._on_frame_ready)
         
         # --- Control Window -> Capture Thread ---
@@ -58,16 +58,16 @@ class GlassCVApp:
         self.capture_thread.continuous_mode = continuous
 
     def _on_frame_ready(self, frame_np):
-        # Convertir de numpy array a QImage
+        # Convert from numpy array to QImage
         qimg = cv2_to_qimage(frame_np)
         if not qimg.isNull():
-            # Actualizar ambas ventanas
+            # Update both windows
             self.control.update_image(qimg)
             self.glass.update_image(qimg)
 
     def run(self):
         exit_code = self.app.exec()
-        # Asegurarse de cerrar el hilo al salir
+        # Ensure thread is closed on exit
         self.capture_thread.stop()
         sys.exit(exit_code)
 

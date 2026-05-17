@@ -6,18 +6,18 @@ class ImageProcessor:
         self.current_filter = "normal"  # "normal", "grayscale", "canny"
     
     def set_filter(self, filter_name: str):
-        """Cambia el filtro activo."""
+        """Changes the active filter."""
         self.current_filter = filter_name
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """
-        Aplica el filtro seleccionado al frame capturado por mss.
-        mss captura frames en formato BGRA.
+        Applies the selected filter to the frame captured by mss.
+        mss captures frames in BGRA format.
         """
         if self.current_filter == "normal":
             return frame
             
-        # Si no es normal, convertimos a BGR para procesar
+        # If not normal, convert to BGR for processing
         if frame.shape[2] == 4:
             bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
         else:
@@ -25,7 +25,7 @@ class ImageProcessor:
             
         if self.current_filter == "grayscale":
             gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            # Retornamos en BGR (3 canales) para consistencia en la UI
+            # Return in BGR (3 channels) for UI consistency
             return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             
         elif self.current_filter == "canny":
