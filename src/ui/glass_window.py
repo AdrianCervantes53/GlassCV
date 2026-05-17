@@ -1,4 +1,5 @@
 import sys
+import ctypes
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap
@@ -16,11 +17,9 @@ class GlassWindow(QWidget):
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool  # Hide from taskbar
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         # Initial geometry
         self.setGeometry(100, 100, 400, 300)
-        
         # Variables for manual movement and resizing
         self._is_moving = False
         self._is_resizing = False
@@ -29,7 +28,7 @@ class GlassWindow(QWidget):
         self._window_start_geometry = QRect()
         
         self.border_width = 5
-        self.border_color = QColor(0, 255, 0, 200) # Semi-transparent green
+        self.border_color = QColor(0, 255, 0) # Opaque green, colorkey doesn't support alpha
         
         # Label for mirror mode
         self.mirror_mode = False
@@ -48,9 +47,9 @@ class GlassWindow(QWidget):
         """Enables or disables mouse interaction with this window."""
         self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, state)
         if state:
-            self.border_color = QColor(255, 0, 0, 200) # Red when pinned
+            self.border_color = QColor(255, 0, 0) # Red when pinned
         else:
-            self.border_color = QColor(0, 255, 0, 200) # Green when movable
+            self.border_color = QColor(0, 255, 0) # Green when movable
             
         # When changing WindowFlags in PyQt6 it is sometimes necessary to hide and show the window
         self.hide()
@@ -79,13 +78,15 @@ class GlassWindow(QWidget):
     def paintEvent(self, event):
         """Draws the border of the capture window."""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Fill with transparent
-        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        # Fill with Magenta (this will be the transparent colorkey)
+        painter.fillRect(self.rect(), QColor(255, 0, 255))
         
         # Draw border
         pen = QPen(self.border_color, self.border_width)
+        # Use square cap and miter join for clean border corners
+        pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         painter.setPen(pen)
         
         # Adjust the rect so the border is drawn completely inside the widget
@@ -183,6 +184,28 @@ class GlassWindow(QWidget):
         bw = self.border_width
         self.geometry_changed.emit(g.x() + bw, g.y() + bw, g.width() - 2*bw, g.height() - 2*bw)
 
+    def _apply_window_affinity(self):
+        # Exclude from screen capture (Windows) to prevent feedback loop in Mirror Mode
+        if sys.platform == "win32":
+            try:
+                hwnd = int(self.winId())
+                
+                # 1. Add WS_EX_LAYERED (0x80000) so we can use colorkey
+                GWL_EXSTYLE = -20
+                WS_EX_LAYERED = 0x80000
+                ex_style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED)
+                
+                # 2. Set Layered Window Attributes with ColorKey (Magenta: 0xFF00FF)
+                # LWA_COLORKEY = 1
+                ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0xFF00FF, 0, 1)
+
+                # 3. Apply WDA_EXCLUDEFROMCAPTURE (0x11)
+                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
+            except Exception as e:
+                print(f"Failed to set window display affinity: {e}")
+
     def showEvent(self, event):
         super().showEvent(event)
+        self._apply_window_affinity()
         self.emit_geometry()

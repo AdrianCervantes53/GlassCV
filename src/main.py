@@ -7,7 +7,7 @@ from core.capture import CaptureThread
 from ui.glass_window import GlassWindow
 from ui.control_window import ControlWindow
 
-class GlassCVApp:
+class GlassCV:
     def __init__(self):
         # 1. Enable DPI Awareness before creating QApplication
         enable_dpi_awareness()
@@ -72,5 +72,5 @@ class GlassCVApp:
         sys.exit(exit_code)
 
 if __name__ == "__main__":
-    app = GlassCVApp()
+    app = GlassCV()
     app.run()
