@@ -97,7 +97,7 @@ class ControlWindow(QWidget):
         filters_layout = QHBoxLayout()
         
         self.combo_filters = QComboBox()
-        self.combo_filters.addItems(["normal", "grayscale", "canny"])
+        self.combo_filters.addItems(["normal", "grayscale", "canny", "mirror"])
         self.combo_filters.currentTextChanged.connect(self.filter_changed.emit)
         
         self.btn_save = QPushButton("Save Image")

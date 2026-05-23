@@ -3,7 +3,7 @@ import numpy as np
 
 class ImageProcessor:
     def __init__(self):
-        self.current_filter = "normal"  # "normal", "grayscale", "canny"
+        self.current_filter = "normal"  # "normal", "grayscale", "canny", "mirror"
     
     def set_filter(self, filter_name: str):
         """Changes the active filter."""
@@ -32,5 +32,8 @@ class ImageProcessor:
             gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, 100, 200)
             return cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            
+        elif self.current_filter == "mirror":
+            return cv2.flip(bgr_frame, 1)
             
         return frame
