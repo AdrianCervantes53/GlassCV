@@ -4,10 +4,15 @@ import numpy as np
 class ImageProcessor:
     def __init__(self):
         self.current_filter = "normal"  # "normal", "grayscale", "canny", "mirror"
+        self.filter_params = {}
     
     def set_filter(self, filter_name: str):
         """Changes the active filter."""
         self.current_filter = filter_name
+
+    def set_filter_params(self, params: dict):
+        """Updates the active filter parameters."""
+        self.filter_params = params
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -30,7 +35,9 @@ class ImageProcessor:
             
         elif self.current_filter == "canny":
             gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            edges = cv2.Canny(gray, 100, 200)
+            t1 = self.filter_params.get("canny_t1", 100)
+            t2 = self.filter_params.get("canny_t2", 200)
+            edges = cv2.Canny(gray, t1, t2)
             return cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
             
         elif self.current_filter == "mirror":

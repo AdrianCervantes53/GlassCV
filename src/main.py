@@ -46,6 +46,7 @@ class GlassCV:
         
         # --- Control Window -> Processor ---
         self.control.filter_changed.connect(self.processor.set_filter)
+        self.control.filter_params_changed.connect(self.processor.set_filter_params)
         
         # --- Control Window -> Glass Window ---
         self.control.glass_pinned.connect(self.glass.set_click_through)

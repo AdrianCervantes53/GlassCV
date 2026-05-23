@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox
+    QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox,
+    QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -15,6 +16,7 @@ class ControlWindow(QWidget):
     mirror_mode_changed = pyqtSignal(bool)
     save_requested = pyqtSignal(str)
     border_toggled = pyqtSignal(bool)
+    filter_params_changed = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -94,19 +96,58 @@ class ControlWindow(QWidget):
 
         # Group: Filters and Output
         group_filters = QGroupBox("Filters and Output")
-        filters_layout = QHBoxLayout()
+        filters_main_layout = QVBoxLayout()
         
+        top_filters_layout = QHBoxLayout()
         self.combo_filters = QComboBox()
         self.combo_filters.addItems(["normal", "grayscale", "canny", "mirror"])
-        self.combo_filters.currentTextChanged.connect(self.filter_changed.emit)
+        self.combo_filters.currentTextChanged.connect(self._on_filter_changed)
         
         self.btn_save = QPushButton("Save Image")
         self.btn_save.clicked.connect(self._on_save_clicked)
         
-        filters_layout.addWidget(QLabel("Filter:"))
-        filters_layout.addWidget(self.combo_filters)
-        filters_layout.addWidget(self.btn_save)
-        group_filters.setLayout(filters_layout)
+        top_filters_layout.addWidget(QLabel("Filter:"))
+        top_filters_layout.addWidget(self.combo_filters)
+        top_filters_layout.addWidget(self.btn_save)
+        filters_main_layout.addLayout(top_filters_layout)
+        
+        # Stacked Widget for parameters
+        self.stacked_params = QStackedWidget()
+        
+        # Empty page
+        self.empty_page = QWidget()
+        self.stacked_params.addWidget(self.empty_page)
+        
+        # Canny page
+        self.canny_page = QWidget()
+        canny_layout = QVBoxLayout(self.canny_page)
+        canny_layout.setContentsMargins(0, 5, 0, 0)
+        
+        t1_layout = QHBoxLayout()
+        self.lbl_canny_t1 = QLabel("Threshold 1 (0-500): 100")
+        self.slider_canny_t1 = QSlider(Qt.Orientation.Horizontal)
+        self.slider_canny_t1.setRange(0, 500)
+        self.slider_canny_t1.setValue(100)
+        self.slider_canny_t1.valueChanged.connect(self._on_canny_params_changed)
+        t1_layout.addWidget(self.lbl_canny_t1)
+        t1_layout.addWidget(self.slider_canny_t1)
+        
+        t2_layout = QHBoxLayout()
+        self.lbl_canny_t2 = QLabel("Threshold 2 (0-500): 200")
+        self.slider_canny_t2 = QSlider(Qt.Orientation.Horizontal)
+        self.slider_canny_t2.setRange(0, 500)
+        self.slider_canny_t2.setValue(200)
+        self.slider_canny_t2.valueChanged.connect(self._on_canny_params_changed)
+        t2_layout.addWidget(self.lbl_canny_t2)
+        t2_layout.addWidget(self.slider_canny_t2)
+        
+        canny_layout.addLayout(t1_layout)
+        canny_layout.addLayout(t2_layout)
+        self.stacked_params.addWidget(self.canny_page)
+        
+        filters_main_layout.addWidget(self.stacked_params)
+        
+        group_filters.setLayout(filters_main_layout)
         controls_layout.addWidget(group_filters)
 
         main_layout.addLayout(controls_layout)
@@ -182,6 +223,21 @@ class ControlWindow(QWidget):
     def _on_fps_changed(self, value: int):
         self.lbl_fps_val.setText(str(value))
         self.fps_changed.emit(value)
+
+    def _on_filter_changed(self, filter_name: str):
+        self.filter_changed.emit(filter_name)
+        if filter_name == "canny":
+            self.stacked_params.setCurrentWidget(self.canny_page)
+            self._on_canny_params_changed()
+        else:
+            self.stacked_params.setCurrentWidget(self.empty_page)
+
+    def _on_canny_params_changed(self):
+        t1 = self.slider_canny_t1.value()
+        t2 = self.slider_canny_t2.value()
+        self.lbl_canny_t1.setText(f"Threshold 1 (0-500): {t1}")
+        self.lbl_canny_t2.setText(f"Threshold 2 (0-500): {t2}")
+        self.filter_params_changed.emit({"canny_t1": t1, "canny_t2": t2})
 
     def _on_save_clicked(self):
         if self._current_pixmap:
