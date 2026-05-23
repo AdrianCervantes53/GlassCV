@@ -7,9 +7,9 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap
 class GlassWindow(QWidget):
     geometry_changed = pyqtSignal(int, int, int, int) # x, y, w, h
 
-    def __init__(self):
+    def __init__(self, title="GlassCV - Glass", geometry=(100, 100, 400, 300), border_color=None):
         super().__init__()
-        self.setWindowTitle("GlassCV - Glass")
+        self.setWindowTitle(title)
         
         # Initial window attributes
         self.setWindowFlags(
@@ -19,7 +19,7 @@ class GlassWindow(QWidget):
         )
         
         # Initial geometry
-        self.setGeometry(100, 100, 400, 300)
+        self.setGeometry(*geometry)
         # Variables for manual movement and resizing
         self._is_moving = False
         self._is_resizing = False
@@ -28,7 +28,8 @@ class GlassWindow(QWidget):
         self._window_start_geometry = QRect()
         
         self.border_width = 4
-        self.border_color = QColor(70, 180, 70) # Softer green (colorkey doesn't support true alpha)
+        self.default_border_color = border_color if border_color else QColor(70, 180, 70)
+        self.border_color = self.default_border_color
         self.show_border = True
         
         # Label for mirror mode
@@ -50,7 +51,7 @@ class GlassWindow(QWidget):
         if state:
             self.border_color = QColor(180, 70, 70) # Softer red when pinned
         else:
-            self.border_color = QColor(70, 180, 70) # Softer green when movable
+            self.border_color = self.default_border_color
             
         if sys.platform == "win32":
             hwnd = int(self.winId())

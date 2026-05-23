@@ -21,6 +21,12 @@ class GlassCV:
         
         # 3. Instantiate UI
         self.glass = GlassWindow()
+        from PyQt6.QtGui import QColor
+        self.template_glass = GlassWindow(
+            title="GlassCV - Template", 
+            geometry=(150, 150, 100, 100), 
+            border_color=QColor(255, 165, 0)
+        )
         self.control = ControlWindow()
         
         # 4. Connect Signals
@@ -55,6 +61,10 @@ class GlassCV:
         
         # --- Control Window -> File System ---
         self.control.save_requested.connect(self.control.save_current_pixmap)
+        
+        # --- Control Window -> Template Glass ---
+        self.control.toggle_template_glass.connect(self._toggle_template_glass)
+        self.control.request_template_capture.connect(self._capture_template)
 
     def _set_continuous_mode(self, continuous: bool):
         self.capture_thread.continuous_mode = continuous
@@ -72,6 +82,32 @@ class GlassCV:
         # Ensure thread is closed on exit
         self.capture_thread.stop()
         sys.exit(exit_code)
+
+    def _toggle_template_glass(self, state: bool):
+        if state:
+            self.template_glass.show()
+        else:
+            self.template_glass.hide()
+
+    def _capture_template(self):
+        import mss
+        import numpy as np
+        g = self.template_glass.geometry()
+        bw = self.template_glass.border_width
+        
+        region = {
+            "top": g.y() + bw,
+            "left": g.x() + bw,
+            "width": max(1, g.width() - 2*bw),
+            "height": max(1, g.height() - 2*bw)
+        }
+        
+        with mss.mss() as sct:
+            img = np.array(sct.grab(region))
+            
+        current_params = self.processor.filter_params.copy()
+        current_params["template_img"] = img
+        self.processor.set_filter_params(current_params)
 
 if __name__ == "__main__":
     app = GlassCV()
