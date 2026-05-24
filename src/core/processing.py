@@ -12,7 +12,7 @@ class ImageProcessor:
 
     def set_filter_params(self, params: dict):
         """Updates the active filter parameters."""
-        self.filter_params = params
+        self.filter_params.update(params)
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """

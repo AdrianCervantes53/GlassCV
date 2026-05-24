@@ -141,8 +141,11 @@ class GlassWindow(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._resize_edge = self.get_resize_edge(event.pos())
-            if self._resize_edge:
+            if self._resize_edge and "-" in self._resize_edge:
                 self._is_resizing = True
+            elif self._resize_edge:
+                self._is_moving = True
+                self._resize_edge = None
             else:
                 self._is_moving = True
                 
@@ -188,14 +191,13 @@ class GlassWindow(QWidget):
         else:
             # Change the cursor depending on the edge
             edge = self.get_resize_edge(event.pos())
-            if edge in ["left", "right"]:
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
-            elif edge in ["top", "bottom"]:
-                self.setCursor(Qt.CursorShape.SizeVerCursor)
-            elif edge in ["top-left", "bottom-right"]:
-                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-            elif edge in ["top-right", "bottom-left"]:
-                self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+            if edge and "-" in edge:
+                if edge in ["top-left", "bottom-right"]:
+                    self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                elif edge in ["top-right", "bottom-left"]:
+                    self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+            elif edge:
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
             else:
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
