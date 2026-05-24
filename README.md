@@ -2,7 +2,7 @@
 
 GlassCV is a high-performance desktop application focused on real-time screen capture and processing. It is built using Python, PyQt6, and OpenCV, with a primary focus on low latency and efficient processing.
 
-## 🚀 Key Features
+## Key Features
 
 - **Dual Window Architecture**: 
   - **Glass Overlay**: A transparent, draggable, and resizable overlay that allows you to select the exact region of the screen you want to capture.
@@ -12,7 +12,7 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
 - **HiDPI Support**: Advanced support for screens with different DPI scales, ensuring that capture coordinates are accurate across any monitor configuration.
 - **AI and Computer Vision Ready**: The codebase is structured to scale easily and integrate computer vision models in the future, such as YOLO, for real-time analysis of the captured region.
 
-## 🛠️ Technologies Used
+## Technologies Used
 
 - **Python >= 3.11**
 - **PyQt6**: For GUI development and advanced window management.
@@ -20,7 +20,7 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
 - **MSS (`mss`)**: For extremely low-latency, cross-platform screen capture.
 - **NumPy**: For efficient manipulation of pixel matrices and image data.
 
-## 📦 Installation
+## Installation
 
 1. Clone the repository:
    ```bash
@@ -44,7 +44,7 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
    pip install -e .
    ```
 
-## 🚀 Usage
+## Usage
 
 To run the application, execute the main script located in the `src` directory:
 
@@ -56,7 +56,7 @@ Upon launching, two windows will open:
 1. The **Control Panel**: From here you can control the workflow and configure options.
 2. The **Glass Window**: Drag and resize this transparent box over the specific area of your screen that you wish to capture and analyze.
 
-## 📂 Project Structure
+## Project Structure
 
 - `src/`
   - `main.py`: Main entry point of the application.
@@ -65,7 +65,7 @@ Upon launching, two windows will open:
 - `pyproject.toml`: Project configuration and dependencies.
 - `.gitignore`: Exclusion rules to prevent uploading temporary files, binaries, and virtual environments to the repository.
 
-## 📝 Roadmap
+## Roadmap
 - Real-time object detection model integration in the processing pipeline (e.g., YOLO).
 - Add OpenCV processing options and filters that can be configured directly from the Control Panel.
 - Multi-monitor management improvements.
