@@ -42,6 +42,26 @@ class ImageProcessor:
             
         elif self.current_filter == "mirror":
             return cv2.flip(bgr_frame, 1)
+        
+        elif self.current_filter == "symmetry":
+            axis = self.filter_params.get("symmetry_axis", "vertical")
+            h, w = bgr_frame.shape[:2]
+            result = bgr_frame.copy()
+            if axis == "vertical":
+                half_w = w // 2
+                if half_w > 0:
+                    left_half = bgr_frame[:, :half_w]
+                    mirrored_left = cv2.flip(left_half, 1)
+                    paste_w = min(mirrored_left.shape[1], w - half_w)
+                    result[:, half_w:half_w+paste_w] = mirrored_left[:, :paste_w]
+            else:
+                half_h = h // 2
+                if half_h > 0:
+                    top_half = bgr_frame[:half_h, :]
+                    mirrored_top = cv2.flip(top_half, 0)
+                    paste_h = min(mirrored_top.shape[0], h - half_h)
+                    result[half_h:half_h+paste_h, :] = mirrored_top[:paste_h, :]
+            return result
             
         elif self.current_filter == "rgb_mixer":
             r_mult = self.filter_params.get("r_mult", 100) / 100.0

@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox,
-    QStackedWidget
+    QStackedWidget, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -90,9 +90,12 @@ class ControlWindow(QWidget):
         self.chk_border.setChecked(True)
         self.chk_border.toggled.connect(self.border_toggled.emit)
         
+        self.lbl_glass_size = QLabel("Size: N/A")
+        
         glass_layout.addWidget(self.chk_pin)
         glass_layout.addWidget(self.chk_mirror)
         glass_layout.addWidget(self.chk_border)
+        glass_layout.addWidget(self.lbl_glass_size)
         group_glass.setLayout(glass_layout)
         controls_layout.addWidget(group_glass)
 
@@ -103,7 +106,7 @@ class ControlWindow(QWidget):
         top_filters_layout = QHBoxLayout()
         self.combo_filters = QComboBox()
         self.combo_filters.addItems([
-            "normal", "grayscale", "canny", "mirror",
+            "normal", "grayscale", "canny", "mirror", "symmetry",
             "rgb_mixer", "binary", "pixelated",
             "colorblind", "object_counter", "smart_inverter"
         ])
@@ -111,6 +114,9 @@ class ControlWindow(QWidget):
         
         self.btn_save = QPushButton("Save Image")
         self.btn_save.clicked.connect(self._on_save_clicked)
+        
+        self.btn_copy = QPushButton("Copy")
+        self.btn_copy.clicked.connect(self._on_copy_clicked)
         
         top_filters_layout.addWidget(QLabel("Filter:"))
         top_filters_layout.addWidget(self.combo_filters)
@@ -250,6 +256,16 @@ class ControlWindow(QWidget):
         inv_layout.addLayout(inv_h_layout)
         self.stacked_params.addWidget(self.inv_page)
         
+        # symmetry
+        self.sym_page = QWidget()
+        sym_layout = QHBoxLayout(self.sym_page)
+        self.combo_sym = QComboBox()
+        self.combo_sym.addItems(["vertical", "horizontal"])
+        self.combo_sym.currentTextChanged.connect(self._on_sym_params_changed)
+        sym_layout.addWidget(QLabel("Axis:"))
+        sym_layout.addWidget(self.combo_sym)
+        self.stacked_params.addWidget(self.sym_page)
+        
         filters_main_layout.addWidget(self.stacked_params)
         
         group_filters.setLayout(filters_main_layout)
@@ -352,6 +368,9 @@ class ControlWindow(QWidget):
         elif filter_name == "smart_inverter":
             self.stacked_params.setCurrentWidget(self.inv_page)
             self._on_inv_params_changed()
+        elif filter_name == "symmetry":
+            self.stacked_params.setCurrentWidget(self.sym_page)
+            self._on_sym_params_changed()
         else:
             self.stacked_params.setCurrentWidget(self.empty_page)
 
@@ -401,6 +420,9 @@ class ControlWindow(QWidget):
         self.lbl_inv.setText(f"Intensity (0-100%): {val}")
         self.filter_params_changed.emit({"intensity": val})
 
+    def _on_sym_params_changed(self):
+        self.filter_params_changed.emit({"symmetry_axis": self.combo_sym.currentText()})
+
     def _on_save_clicked(self):
         if self._current_pixmap:
             file_name, _ = QFileDialog.getSaveFileName(
@@ -424,3 +446,10 @@ class ControlWindow(QWidget):
     def save_current_pixmap(self, file_name: str):
         if self._current_pixmap:
             self._current_pixmap.save(file_name)
+
+    def update_glass_size(self, x: int, y: int, w: int, h: int):
+        self.lbl_glass_size.setText(f"Size: {w}x{h}")
+
+    def _on_copy_clicked(self):
+        if self._current_pixmap:
+            QApplication.clipboard().setPixmap(self._current_pixmap)

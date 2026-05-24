@@ -40,6 +40,7 @@ class GlassCV:
     def _connect_signals(self):
         # --- Glass -> Capture Thread ---
         self.glass.geometry_changed.connect(self.capture_thread.update_region)
+        self.glass.geometry_changed.connect(self.control.update_glass_size)
         
         # --- Capture Thread -> UI ---
         # The thread emits a numpy array (processed frame)
