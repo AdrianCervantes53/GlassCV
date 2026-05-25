@@ -128,37 +128,67 @@ class ControlWindow(QWidget):
         # ── Filters ───────────────────────────────────────────────────
         group_filters = QGroupBox("Filter Chain")
         filters_main_layout = QVBoxLayout()
-        
-        top_filters_layout = QHBoxLayout()
-        self.combo_filters = QComboBox()
-        self.combo_filters.addItems([
-            "normal", "grayscale", "canny", "mirror", "symmetry",
-            "rgb_mixer", "binary", "pixelated",
-            "colorblind", "object_counter", "smart_inverter"
-        ])
-        self.combo_filters.currentTextChanged.connect(self._on_filter_changed)
-        
+        filters_main_layout.setSpacing(6)
+        # Row 1: combo + Add button
+        add_row = QHBoxLayout()
+        self.combo_add_filter = QComboBox()
+        for name in self.ALL_FILTERS:
+            self.combo_add_filter.addItem(FILTER_DISPLAY_NAMES.get(name, name), userData=name)
+        self.btn_add_filter = QPushButton("＋ Add")
+        self.btn_add_filter.setFixedWidth(70)
+        self.btn_add_filter.clicked.connect(self._on_add_filter)
+        add_row.addWidget(QLabel("Filter:"))
+        add_row.addWidget(self.combo_add_filter, stretch=1)
+        add_row.addWidget(self.btn_add_filter)
+        filters_main_layout.addLayout(add_row)
+        # Row 2: Chain list (drag & drop) + Remove button
+        chain_row = QHBoxLayout()
+        self.list_chain = QListWidget()
+        self.list_chain.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list_chain.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list_chain.setFixedHeight(100)
+        self.list_chain.setToolTip("Drag to reorder. Select a filter to edit its parameters below.")
+        self.list_chain.currentRowChanged.connect(self._on_chain_selection_changed)
+        # Reorder detection via model signals
+        self.list_chain.model().rowsMoved.connect(self._on_chain_reordered)
+        chain_row.addWidget(self.list_chain, stretch=1)
+        chain_btns = QVBoxLayout()
+        self.btn_remove_filter = QPushButton("✕")
+        self.btn_remove_filter.setFixedWidth(32)
+        self.btn_remove_filter.setToolTip("Remove selected filter")
+        self.btn_remove_filter.clicked.connect(self._on_remove_filter)
+        self.btn_move_up = QPushButton("▲")
+        self.btn_move_up.setFixedWidth(32)
+        self.btn_move_up.setToolTip("Move up")
+        self.btn_move_up.clicked.connect(self._on_move_up)
+        self.btn_move_down = QPushButton("▼")
+        self.btn_move_down.setFixedWidth(32)
+        self.btn_move_down.setToolTip("Move down")
+        self.btn_move_down.clicked.connect(self._on_move_down)
+        chain_btns.addWidget(self.btn_move_up)
+        chain_btns.addWidget(self.btn_move_down)
+        chain_btns.addWidget(self.btn_remove_filter)
+        chain_btns.addStretch()
+        chain_row.addLayout(chain_btns)
+        filters_main_layout.addLayout(chain_row)
+        # Row 3: Save / Copy buttons
+        output_row = QHBoxLayout()
         self.btn_save = QPushButton("Save Image")
         self.btn_save.clicked.connect(self._on_save_clicked)
-        
         self.btn_copy = QPushButton("Copy")
         self.btn_copy.clicked.connect(self._on_copy_clicked)
-        
-        top_filters_layout.addWidget(QLabel("Filter:"))
-        top_filters_layout.addWidget(self.combo_filters)
-        top_filters_layout.addWidget(self.btn_save)
-        filters_main_layout.addLayout(top_filters_layout)
-        
-        # Stacked Widget for parameters
+        output_row.addStretch()
+        output_row.addWidget(self.btn_save)
+        output_row.addWidget(self.btn_copy)
+        filters_main_layout.addLayout(output_row)
+        # Row 4: Parameter panel (stacked)
         self.stacked_params = QStackedWidget()
         self._build_param_pages()
         filters_main_layout.addWidget(self.stacked_params)
-
         group_filters.setLayout(filters_main_layout)
         controls_layout.addWidget(group_filters)
-
         main_layout.addLayout(controls_layout)
-
+        
     # ------------------------------------------------------------------
     # Parameter pages (one per filter that has parameters)
     # ------------------------------------------------------------------
@@ -285,21 +315,6 @@ class ControlWindow(QWidget):
         inv_row.addWidget(self.slider_inv)
         inv_layout.addLayout(inv_row)
         self.stacked_params.addWidget(self.inv_page)
-        
-        # symmetry
-        self.sym_page = QWidget()
-        sym_layout = QHBoxLayout(self.sym_page)
-        self.combo_sym = QComboBox()
-        self.combo_sym.addItems(["vertical", "horizontal"])
-        self.combo_sym.currentTextChanged.connect(self._on_sym_params_changed)
-        sym_layout.addWidget(QLabel("Axis:"))
-        sym_layout.addWidget(self.combo_sym)
-        self.stacked_params.addWidget(self.sym_page)
-        
-        filters_main_layout.addWidget(self.stacked_params)
-        
-        group_filters.setLayout(filters_main_layout)
-        controls_layout.addWidget(group_filters)
 
         # ── Symmetry ──────────────────────────────────────────────────
         self.sym_page = QWidget()
@@ -571,84 +586,6 @@ class ControlWindow(QWidget):
         self.lbl_fps_val.setText(str(value))
         self.fps_changed.emit(value)
 
-    def _on_filter_changed(self, filter_name: str):
-        self.filter_changed.emit(filter_name)
-        if filter_name == "canny":
-            self.stacked_params.setCurrentWidget(self.canny_page)
-            self._on_canny_params_changed()
-        elif filter_name == "rgb_mixer":
-            self.stacked_params.setCurrentWidget(self.rgb_page)
-            self._on_rgb_params_changed()
-        elif filter_name == "binary":
-            self.stacked_params.setCurrentWidget(self.binary_page)
-            self._on_binary_params_changed()
-        elif filter_name == "pixelated":
-            self.stacked_params.setCurrentWidget(self.pix_page)
-            self._on_pix_params_changed()
-        elif filter_name == "colorblind":
-            self.stacked_params.setCurrentWidget(self.cb_page)
-            self._on_cb_params_changed()
-        elif filter_name == "object_counter":
-            self.stacked_params.setCurrentWidget(self.obj_page)
-            self._on_obj_params_changed()
-        elif filter_name == "smart_inverter":
-            self.stacked_params.setCurrentWidget(self.inv_page)
-            self._on_inv_params_changed()
-        elif filter_name == "symmetry":
-            self.stacked_params.setCurrentWidget(self.sym_page)
-            self._on_sym_params_changed()
-        else:
-            self.stacked_params.setCurrentWidget(self.empty_page)
-
-    def _on_canny_params_changed(self):
-        t1 = self.slider_canny_t1.value()
-        t2 = self.slider_canny_t2.value()
-        self.lbl_canny_t1.setText(f"Threshold 1 (0-500): {t1}")
-        self.lbl_canny_t2.setText(f"Threshold 2 (0-500): {t2}")
-        self.filter_params_changed.emit({"canny_t1": t1, "canny_t2": t2})
-
-    def _on_rgb_params_changed(self):
-        r, g, b = self.slider_r.value(), self.slider_g.value(), self.slider_b.value()
-        self.lbl_r.setText(f"Red (0-200%): {r}")
-        self.lbl_g.setText(f"Green (0-200%): {g}")
-        self.lbl_b.setText(f"Blue (0-200%): {b}")
-        self.filter_params_changed.emit({"r_mult": r, "g_mult": g, "b_mult": b})
-
-    def _on_binary_params_changed(self):
-        val = self.slider_bin.value()
-        self.lbl_bin.setText(f"Threshold (0-255): {val}")
-        self.filter_params_changed.emit({"binary_threshold": val})
-
-    def _on_pix_params_changed(self):
-        val = self.slider_pix.value()
-        self.lbl_pix.setText(f"Pixel Size (2-50): {val}")
-        self.filter_params_changed.emit({"pixel_size": val})
-
-    def _on_cb_params_changed(self):
-        self.filter_params_changed.emit({"cb_type": self.combo_cb.currentText()})
-
-    def _on_obj_params_changed(self):
-        val = self.slider_conf.value()
-        self.lbl_conf.setText(f"Confidence (1-100%): {val}")
-        # Note: template_img needs to be sent by capture method, but we can emit partial or rely on main storing it.
-        # It's better for main.py to handle setting template_img, and here we just emit confidence.
-        self.filter_params_changed.emit({"confidence": val})
-        
-    def _on_toggle_tg(self, checked):
-        if checked:
-            self.btn_toggle_tg.setText("Hide Template Glass")
-        else:
-            self.btn_toggle_tg.setText("Show Template Glass")
-        self.toggle_template_glass.emit(checked)
-
-    def _on_inv_params_changed(self):
-        val = self.slider_inv.value()
-        self.lbl_inv.setText(f"Intensity (0-100%): {val}")
-        self.filter_params_changed.emit({"intensity": val})
-
-    def _on_sym_params_changed(self):
-        self.filter_params_changed.emit({"symmetry_axis": self.combo_sym.currentText()})
-
     def _on_save_clicked(self):
         if self._current_pixmap:
             file_name, _ = QFileDialog.getSaveFileName(
@@ -682,7 +619,3 @@ class ControlWindow(QWidget):
 
     def update_glass_size(self, x: int, y: int, w: int, h: int):
         self.lbl_glass_size.setText(f"Size: {w}x{h}")
-
-    def _on_copy_clicked(self):
-        if self._current_pixmap:
-            QApplication.clipboard().setPixmap(self._current_pixmap)
