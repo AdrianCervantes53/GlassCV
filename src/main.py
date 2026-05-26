@@ -51,9 +51,9 @@ class GlassCV:
         self.control.snapshot_requested.connect(self.capture_thread.request_snapshot)
         self.control.fps_changed.connect(self.capture_thread.set_fps)
         
-        # --- Control Window -> Processor ---
-        self.control.filter_changed.connect(self.processor.set_filter)
-        self.control.filter_params_changed.connect(self.processor.set_filter_params)
+        # --- Control Window -> Processor (chain-based) ---
+        self.control.filter_chain_changed.connect(self.processor.set_filter_chain)
+        self.control.filter_params_changed_for.connect(self.processor.update_filter_params)
         
         # --- Control Window -> Glass Window ---
         self.control.glass_pinned.connect(self.glass.set_click_through)
@@ -106,9 +106,7 @@ class GlassCV:
         with mss.mss() as sct:
             img = np.array(sct.grab(region))
             
-        current_params = self.processor.filter_params.copy()
-        current_params["template_img"] = img
-        self.processor.set_filter_params(current_params)
+        self.processor.update_filter_params("object_counter", {"template_img": img})
 
 if __name__ == "__main__":
     app = GlassCV()
