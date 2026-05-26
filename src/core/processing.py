@@ -1,141 +1,262 @@
 import cv2
 import numpy as np
 
+
+# ---------------------------------------------------------------------------
+# Individual filter functions
+# Each function receives a BGR frame (np.ndarray) and a params dict,
+# and returns a BGR frame (np.ndarray).
+# ---------------------------------------------------------------------------
+
+def _to_bgr(frame: np.ndarray) -> np.ndarray:
+    """Ensure frame is BGR (3-channel)."""
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    return frame
+
+
+def apply_normal(frame: np.ndarray, params: dict) -> np.ndarray:
+    return _to_bgr(frame)
+
+
+def apply_grayscale(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+
+def apply_canny(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    t1 = params.get("canny_t1", 100)
+    t2 = params.get("canny_t2", 200)
+    edges = cv2.Canny(gray, t1, t2)
+    return cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+
+
+def apply_mirror(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    return cv2.flip(bgr, 1)
+
+
+def apply_symmetry(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    axis = params.get("symmetry_axis", "vertical")
+    h, w = bgr.shape[:2]
+    result = bgr.copy()
+    if axis == "vertical":
+        half_w = w // 2
+        if half_w > 0:
+            left_half = bgr[:, :half_w]
+            mirrored_left = cv2.flip(left_half, 1)
+            paste_w = min(mirrored_left.shape[1], w - half_w)
+            result[:, half_w:half_w + paste_w] = mirrored_left[:, :paste_w]
+    else:
+        half_h = h // 2
+        if half_h > 0:
+            top_half = bgr[:half_h, :]
+            mirrored_top = cv2.flip(top_half, 0)
+            paste_h = min(mirrored_top.shape[0], h - half_h)
+            result[half_h:half_h + paste_h, :] = mirrored_top[:paste_h, :]
+    return result
+
+
+def apply_rgb_mixer(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    r_mult = params.get("r_mult", 100) / 100.0
+    g_mult = params.get("g_mult", 100) / 100.0
+    b_mult = params.get("b_mult", 100) / 100.0
+    bgr_float = bgr.astype(np.float32)
+    bgr_float[:, :, 0] *= b_mult
+    bgr_float[:, :, 1] *= g_mult
+    bgr_float[:, :, 2] *= r_mult
+    return np.clip(bgr_float, 0, 255).astype(np.uint8)
+
+
+def apply_binary(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    threshold = params.get("binary_threshold", 127)
+    _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+
+def apply_pixelated(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    pixel_size = max(2, params.get("pixel_size", 10))
+    h, w = bgr.shape[:2]
+    small = cv2.resize(bgr, (max(1, w // pixel_size), max(1, h // pixel_size)),
+                       interpolation=cv2.INTER_LINEAR)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+
+
+def apply_colorblind(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    cb_type = params.get("cb_type", "protanopia")
+    matrices = {
+        "protanopia":   np.array([[0.567, 0.433, 0], [0.558, 0.442, 0], [0, 0.242, 0.758]]),
+        "deuteranopia": np.array([[0.625, 0.375, 0], [0.7,   0.3,   0], [0, 0.3,   0.7  ]]),
+        "tritanopia":   np.array([[0.95,  0.05,  0], [0, 0.433, 0.567], [0, 0.475, 0.525]]),
+    }
+    matrix = matrices.get(cb_type, np.eye(3))
+    rgb_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    cb_rgb = cv2.transform(rgb_frame, matrix)
+    return cv2.cvtColor(cb_rgb, cv2.COLOR_RGB2BGR)
+
+
+def apply_object_counter(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    template = params.get("template_img", None)
+    confidence = params.get("confidence", 80) / 100.0
+    result_frame = bgr.copy()
+    if template is not None and template.size > 0:
+        th, tw = template.shape[:2]
+        fh, fw = bgr.shape[:2]
+        if th <= fh and tw <= fw and th > 0 and tw > 0:
+            gray_frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) if len(template.shape) == 3 else template
+            res = cv2.matchTemplate(gray_frame, template_gray, cv2.TM_CCOEFF_NORMED)
+            loc = np.where(res >= confidence)
+            boxes = [[int(pt[0]), int(pt[1]), int(tw), int(th)] for pt in zip(*loc[::-1])]
+            if boxes:
+                boxes, _ = cv2.groupRectangles(boxes, 1, 0.2)
+                count = len(boxes)
+                for (x, y, w, h) in boxes:
+                    cv2.rectangle(result_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(result_frame, f"Objects: {count}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                cv2.putText(result_frame, "Objects: 0", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            cv2.putText(result_frame, "Invalid template size", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    else:
+        cv2.putText(result_frame, "No template captured", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    return result_frame
+
+
+def apply_smart_inverter(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    intensity = params.get("intensity", 100) / 100.0
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    inv_v = 255 - v
+    blended_v = cv2.addWeighted(v, 1.0 - intensity, inv_v, intensity, 0)
+    hsv_blended = cv2.merge([h, s, blended_v])
+    return cv2.cvtColor(hsv_blended, cv2.COLOR_HSV2BGR)
+
+
+# ---------------------------------------------------------------------------
+# Registry: maps filter name -> function
+# ---------------------------------------------------------------------------
+FILTER_REGISTRY = {
+    "normal":         apply_normal,
+    "grayscale":      apply_grayscale,
+    "canny":          apply_canny,
+    "mirror":         apply_mirror,
+    "symmetry":       apply_symmetry,
+    "rgb_mixer":      apply_rgb_mixer,
+    "binary":         apply_binary,
+    "pixelated":      apply_pixelated,
+    "colorblind":     apply_colorblind,
+    "object_counter": apply_object_counter,
+    "smart_inverter": apply_smart_inverter,
+}
+
+# Human-readable display names
+FILTER_DISPLAY_NAMES = {
+    "normal":         "Normal",
+    "grayscale":      "Grayscale",
+    "canny":          "Canny Edges",
+    "mirror":         "Mirror",
+    "symmetry":       "Symmetry",
+    "rgb_mixer":      "RGB Mixer",
+    "binary":         "Binary",
+    "pixelated":      "Pixelated",
+    "colorblind":     "Colorblind Sim.",
+    "object_counter": "Object Counter",
+    "smart_inverter": "Smart Inverter",
+}
+
+
+# ---------------------------------------------------------------------------
+# ImageProcessor: chain-based processing
+# ---------------------------------------------------------------------------
 class ImageProcessor:
     def __init__(self):
-        self.current_filter = "normal"  # "normal", "grayscale", "canny", "mirror"
-        self.filter_params = {}
-    
-    def set_filter(self, filter_name: str):
-        """Changes the active filter."""
-        self.current_filter = filter_name
+        # filter_chain: list of dicts {"name": str, "params": dict}
+        # An empty chain is equivalent to "normal" (pass-through).
+        self.filter_chain: list[dict] = []
+        # Shared params store (updated by the UI, keyed by filter name)
+        self.all_params: dict[str, dict] = {}
 
-    def set_filter_params(self, params: dict):
-        """Updates the active filter parameters."""
+        # Legacy single-filter support (kept for backward compat with
+        # parts of the code that still call set_filter / set_filter_params).
+        self._legacy_filter = "normal"
+        self.filter_params: dict = {}  # kept for object_counter template_img
+
+    # ------------------------------------------------------------------
+    # Chain API (new)
+    # ------------------------------------------------------------------
+
+    def set_filter_chain(self, chain: list[dict]):
+        """Replace the entire filter chain.
+
+        chain is a list of {"name": str, "params": dict} entries.
+        """
+        self.filter_chain = chain
+
+    def update_filter_params(self, filter_name: str, params: dict):
+        """Update the params for a specific filter in the chain.
+
+        Merges the new params into the stored params for that filter.
+        All chain entries with the same name share the same params dict.
+        """
+        if filter_name not in self.all_params:
+            self.all_params[filter_name] = {}
+        self.all_params[filter_name].update(params)
+        # Also propagate special keys to filter_params for legacy compat
         self.filter_params.update(params)
 
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Applies the selected filter to the frame captured by mss.
-        mss captures frames in BGRA format.
-        """
-        if self.current_filter == "normal":
-            return frame
-            
-        # If not normal, convert to BGR for processing
-        if frame.shape[2] == 4:
-            bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    # ------------------------------------------------------------------
+    # Legacy API (kept for backward compat with main.py connections)
+    # ------------------------------------------------------------------
+
+    def set_filter(self, filter_name: str):
+        """Legacy: sets a single active filter (replaces the chain)."""
+        self._legacy_filter = filter_name
+        if filter_name == "normal":
+            self.filter_chain = []
         else:
-            bgr_frame = frame
-            
-        if self.current_filter == "grayscale":
-            gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            # Return in BGR (3 channels) for UI consistency
-            return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-            
-        elif self.current_filter == "canny":
-            gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            t1 = self.filter_params.get("canny_t1", 100)
-            t2 = self.filter_params.get("canny_t2", 200)
-            edges = cv2.Canny(gray, t1, t2)
-            return cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-            
-        elif self.current_filter == "mirror":
-            return cv2.flip(bgr_frame, 1)
-            
-        elif self.current_filter == "rgb_mixer":
-            r_mult = self.filter_params.get("r_mult", 100) / 100.0
-            g_mult = self.filter_params.get("g_mult", 100) / 100.0
-            b_mult = self.filter_params.get("b_mult", 100) / 100.0
-            
-            bgr_float = bgr_frame.astype(np.float32)
-            bgr_float[:, :, 0] *= b_mult
-            bgr_float[:, :, 1] *= g_mult
-            bgr_float[:, :, 2] *= r_mult
-            return np.clip(bgr_float, 0, 255).astype(np.uint8)
-            
-        elif self.current_filter == "binary":
-            gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            threshold = self.filter_params.get("binary_threshold", 127)
-            _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-            return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-            
-        elif self.current_filter == "pixelated":
-            pixel_size = max(2, self.filter_params.get("pixel_size", 10))
-            h, w = bgr_frame.shape[:2]
-            small = cv2.resize(bgr_frame, (max(1, w // pixel_size), max(1, h // pixel_size)), interpolation=cv2.INTER_LINEAR)
-            return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
-            
-        elif self.current_filter == "colorblind":
-            cb_type = self.filter_params.get("cb_type", "protanopia")
-            
-            if cb_type == "protanopia":
-                matrix = np.array([[0.567, 0.433, 0], [0.558, 0.442, 0], [0, 0.242, 0.758]])
-            elif cb_type == "deuteranopia":
-                matrix = np.array([[0.625, 0.375, 0], [0.7, 0.3, 0], [0, 0.3, 0.7]])
-            elif cb_type == "tritanopia":
-                matrix = np.array([[0.95, 0.05, 0], [0, 0.433, 0.567], [0, 0.475, 0.525]])
-            else:
-                matrix = np.eye(3)
-                
-            rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-            cb_rgb = cv2.transform(rgb_frame, matrix)
-            return cv2.cvtColor(cb_rgb, cv2.COLOR_RGB2BGR)
-            
-        elif self.current_filter == "object_counter":
-            template = self.filter_params.get("template_img", None)
-            confidence = self.filter_params.get("confidence", 80) / 100.0
-            
-            result_frame = bgr_frame.copy()
-            
-            if template is not None and template.size > 0:
-                th, tw = template.shape[:2]
-                fh, fw = bgr_frame.shape[:2]
-                if th <= fh and tw <= fw and th > 0 and tw > 0:
-                    gray_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-                    
-                    if len(template.shape) == 3:
-                        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-                    else:
-                        template_gray = template
-                        
-                    res = cv2.matchTemplate(gray_frame, template_gray, cv2.TM_CCOEFF_NORMED)
-                    loc = np.where(res >= confidence)
-                    
-                    boxes = []
-                    for pt in zip(*loc[::-1]):
-                        boxes.append([int(pt[0]), int(pt[1]), int(tw), int(th)])
-                        
-                    if len(boxes) > 0:
-                        boxes = np.array(boxes)
-                        # groupRectangles requires a list of rects
-                        boxes, weights = cv2.groupRectangles(boxes.tolist(), 1, 0.2)
-                        count = len(boxes)
-                        for (x, y, w, h) in boxes:
-                            cv2.rectangle(result_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                        cv2.putText(result_frame, f"Objects: {count}", (10, 30), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    else:
-                        cv2.putText(result_frame, "Objects: 0", (10, 30), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                else:
-                    cv2.putText(result_frame, "Invalid template size", (10, 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            else:
-                cv2.putText(result_frame, "No template captured", (10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return result_frame
-            
-        elif self.current_filter == "smart_inverter":
-            intensity = self.filter_params.get("intensity", 100) / 100.0
-            
-            hsv = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2HSV)
-            h, s, v = cv2.split(hsv)
-            
-            inv_v = 255 - v
-            blended_v = cv2.addWeighted(v, 1.0 - intensity, inv_v, intensity, 0)
-            
-            hsv_blended = cv2.merge([h, s, blended_v])
-            return cv2.cvtColor(hsv_blended, cv2.COLOR_HSV2BGR)
-            
-        return frame
+            self.filter_chain = [{"name": filter_name, "params": {}}]
+
+    def set_filter_params(self, params: dict):
+        """Legacy: updates params for the current legacy filter."""
+        self.filter_params.update(params)
+        if self._legacy_filter and self._legacy_filter != "normal":
+            self.update_filter_params(self._legacy_filter, params)
+
+    # ------------------------------------------------------------------
+    # Processing
+    # ------------------------------------------------------------------
+
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Apply the filter chain sequentially and return the result."""
+        if not self.filter_chain:
+            return _to_bgr(frame)
+
+        result = frame
+        for entry in self.filter_chain:
+            name = entry["name"]
+            # Merge stored params with per-entry overrides
+            merged_params = {**self.all_params.get(name, {}), **entry.get("params", {})}
+            # Propagate template_img from legacy store (object_counter needs it)
+            if "template_img" in self.filter_params:
+                merged_params.setdefault("template_img", self.filter_params["template_img"])
+            fn = FILTER_REGISTRY.get(name)
+            if fn:
+                result = fn(result, merged_params)
+
+        return result
