@@ -11,6 +11,8 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
 - **Multithreaded Processing**: Image capture and processing are performed in separate background threads (multithreading) to prevent any UI lag.
 - **HiDPI Support**: Advanced support for screens with different DPI scales, ensuring that capture coordinates are accurate across any monitor configuration.
 - **AI and Computer Vision Ready**: The codebase is structured to scale easily and integrate computer vision models in the future, such as YOLO, for real-time analysis of the captured region.
+- **Real-time Image Processing & Filter Chain**: Apply and chain various built-in OpenCV filters (e.g., Grayscale, Canny Edges, RGB Mixer, Colorblind Simulation, Smart Inverter) directly from the Control Panel.
+- **Template Matching & Object Counting**: Use a dedicated "Template Glass" window to capture a visual template and perform real-time object detection and counting within the main capture region.
 
 ## Technologies Used
 
@@ -52,9 +54,10 @@ To run the application, execute the main script located in the `src` directory:
 python src/main.py
 ```
 
-Upon launching, two windows will open:
-1. The **Control Panel**: From here you can control the workflow and configure options.
+Upon launching, the following main windows will open:
+1. The **Control Panel**: From here you can control the workflow, configure filter chains, and manage options.
 2. The **Glass Window**: Drag and resize this transparent box over the specific area of your screen that you wish to capture and analyze.
+*Note: A third **Template Glass** window can be toggled from the Control Panel to capture specific visual templates for the Object Counter filter.*
 
 ## Project Structure
 
@@ -66,6 +69,6 @@ Upon launching, two windows will open:
 - `.gitignore`: Exclusion rules to prevent uploading temporary files, binaries, and virtual environments to the repository.
 
 ## Roadmap
-- Real-time object detection model integration in the processing pipeline (e.g., YOLO).
-- Add OpenCV processing options and filters that can be configured directly from the Control Panel.
+- Advanced deep learning model integration (e.g., YOLO) for robust real-time object detection.
 - Multi-monitor management improvements.
+- Exporting and importing functionality for custom filter chains.
