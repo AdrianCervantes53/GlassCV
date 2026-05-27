@@ -43,7 +43,6 @@ class ControlWindow(QWidget):
     toggle_template_glass = pyqtSignal(bool)
     request_template_capture = pyqtSignal()
 
-    # All available filter names (in display order)
     ALL_FILTERS = [
         "normal", "grayscale", "canny", "mirror", "symmetry",
         "rgb_mixer", "binary", "pixelated",
@@ -51,10 +50,15 @@ class ControlWindow(QWidget):
         "yolo", "ocr",
     ]
 
+    AVAILABLE_YOLO_MODELS = [
+        "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
+        "yolov8n.pt", "yolov8s.pt", "yolov8m.pt"
+    ]
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GlassCV - Control Panel")
-        self.setMinimumSize(460, 560)
+        self.setMinimumSize(460, 840)
         self._current_pixmap = None
         self._setup_ui()
         self._apply_styles()
@@ -335,11 +339,14 @@ class ControlWindow(QWidget):
         
         # Model selector
         yolo_model_row = QHBoxLayout()
-        self.btn_yolo_model = QPushButton("Select Model (.pt)")
-        self.btn_yolo_model.clicked.connect(self._on_yolo_select_model)
-        self.lbl_yolo_model = QLabel("yolo11n.pt")
-        yolo_model_row.addWidget(self.btn_yolo_model)
-        yolo_model_row.addWidget(self.lbl_yolo_model)
+        self.combo_yolo_model = QComboBox()
+        self.combo_yolo_model.activated.connect(self._on_yolo_combo_activated)
+        self.btn_yolo_custom = QPushButton("Custom...")
+        self.btn_yolo_custom.setFixedWidth(70)
+        self.btn_yolo_custom.clicked.connect(self._on_yolo_select_custom)
+        yolo_model_row.addWidget(QLabel("Model:"))
+        yolo_model_row.addWidget(self.combo_yolo_model, stretch=1)
+        yolo_model_row.addWidget(self.btn_yolo_custom)
         
         # Confidence slider
         yolo_conf_row = QHBoxLayout()
@@ -377,6 +384,8 @@ class ControlWindow(QWidget):
         yolo_layout.addLayout(yolo_iou_row)
         yolo_layout.addLayout(yolo_chk_row)
         self.stacked_params.addWidget(self.yolo_page)
+        
+        self._update_yolo_combo()
 
         # ── OCR ───────────────────────────────────────────────────────
         self.ocr_page = QWidget()
@@ -649,21 +658,47 @@ class ControlWindow(QWidget):
     def _on_sym_params_changed(self):
         self._emit_filter_params({"symmetry_axis": self.combo_sym.currentText()})
 
-    def _on_yolo_select_model(self):
+    def _update_yolo_combo(self, select_model=None):
+        import os
+        current_selection = select_model or self.combo_yolo_model.currentData()
+        self.combo_yolo_model.blockSignals(True)
+        self.combo_yolo_model.clear()
+        
+        index_to_select = 0
+        for i, model in enumerate(self.AVAILABLE_YOLO_MODELS):
+            model_path = os.path.join("models", model)
+            if os.path.exists(model_path):
+                display = f"{model} (Descargado)"
+            else:
+                display = model
+            self.combo_yolo_model.addItem(display, userData=model_path)
+            if current_selection == model_path:
+                index_to_select = i
+                
+        if current_selection and current_selection not in [os.path.join("models", m) for m in self.AVAILABLE_YOLO_MODELS]:
+            self.combo_yolo_model.addItem(f"{os.path.basename(current_selection)} (Custom)", userData=current_selection)
+            index_to_select = self.combo_yolo_model.count() - 1
+            
+        self.combo_yolo_model.setCurrentIndex(index_to_select)
+        self.combo_yolo_model.blockSignals(False)
+
+    def _on_yolo_combo_activated(self, index):
+        self._on_yolo_params_changed()
+
+    def _on_yolo_select_custom(self):
         file_name, _ = QFileDialog.getOpenFileName(
             self, "Select YOLO Model", "", "YOLO Models (*.pt);;All Files (*)"
         )
         if file_name:
-            import os
-            self.lbl_yolo_model.setText(os.path.basename(file_name))
-            self.lbl_yolo_model.setToolTip(file_name)
+            self._update_yolo_combo(select_model=file_name)
             self._on_yolo_params_changed()
 
     def _on_yolo_params_changed(self):
-        model_text = self.lbl_yolo_model.text()
-        tooltip = self.lbl_yolo_model.toolTip()
-        path = tooltip if tooltip else model_text
-        
+        path = self.combo_yolo_model.currentData()
+        if not path:
+            import os
+            path = os.path.join("models", "yolo11n.pt")
+            
         conf = self.slider_yolo_conf.value()
         iou = self.slider_yolo_iou.value()
         self.lbl_yolo_conf.setText(f"Conf (1-100%): {conf}")
@@ -676,6 +711,7 @@ class ControlWindow(QWidget):
             "yolo_labels": self.chk_yolo_labels.isChecked(),
             "yolo_show_conf": self.chk_yolo_show_conf.isChecked(),
         })
+        self._update_yolo_combo()
 
     def _on_ocr_params_changed(self):
         conf = self.slider_ocr_conf.value()
