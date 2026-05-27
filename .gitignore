@@ -59,3 +59,4 @@ temp/
 # Local databases
 *.db
 *.sqlite3
+*.pt
