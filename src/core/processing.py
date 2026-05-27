@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import time
 
+from core.ocr import draw_text_overlay, get_translation_source_lang, translate_text
+
 # ---------------------------------------------------------------------------
 # Lazy AI Models
 # ---------------------------------------------------------------------------
@@ -195,6 +197,14 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     bgr = _to_bgr(frame)
     langs = params.get("ocr_langs", ["en"])
     confidence_thresh = params.get("ocr_conf", 50) / 100.0
+    font_color = params.get("ocr_font_color", (255, 0, 0))
+    font_size = params.get("ocr_font_size", 16)
+    font_scale = max(0.3, font_size / 24.0)
+    hide_overlay = params.get("ocr_hide_overlay", False)
+    translate_enabled = params.get("ocr_translate_enabled", False)
+    translate_target = params.get("ocr_translate_target", "es")
+    subtitle_bg_color = params.get("ocr_subtitle_bg_color", (0, 0, 0))
+    subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 70)
     
     # Throttling logic
     current_time = time.time()
@@ -208,20 +218,43 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
             params["_last_ocr_results"] = results
             params["_last_ocr_time"] = current_time
         except Exception as e:
+            params["_last_ocr_texts"] = ""
+            params["_last_ocr_translated"] = ""
             cv2.putText(bgr, f"OCR Error: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return bgr
     
     results = params.get("_last_ocr_results", [])
+    translation_cache = params.setdefault("_ocr_translation_cache", {})
+    source_lang = get_translation_source_lang(langs)
     annotated_frame = bgr.copy()
+    original_texts = []
+    translated_texts = []
+
     for (bbox, text, prob) in results:
         if prob >= confidence_thresh:
-            # bbox is a list of 4 points: [top_left, top_right, bottom_right, bottom_left]
-            (tl, tr, br, bl) = bbox
-            tl = (int(tl[0]), int(tl[1]))
-            br = (int(br[0]), int(br[1]))
-            cv2.rectangle(annotated_frame, tl, br, (255, 0, 0), 2)
-            cv2.putText(annotated_frame, f"{text} ({prob:.2f})", (tl[0], tl[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            original_texts.append(text)
+            overlay_text = f"{text} ({prob:.2f})"
+            bg_color = None
+
+            if translate_enabled:
+                translated = translate_text(text, source_lang, translate_target, translation_cache)
+                translated_texts.append(translated)
+                overlay_text = translated
+                bg_color = subtitle_bg_color
+
+            if not hide_overlay:
+                draw_text_overlay(
+                    annotated_frame,
+                    bbox,
+                    overlay_text,
+                    font_scale,
+                    font_color,
+                    bg_color,
+                    subtitle_bg_opacity,
+                )
+
+    params["_last_ocr_texts"] = "\n".join(original_texts)
+    params["_last_ocr_translated"] = "\n".join(translated_texts)
     return annotated_frame
 
 
@@ -289,6 +322,11 @@ class ImageProcessor:
         chain is a list of {"name": str, "params": dict} entries.
         """
         self.filter_chain = chain
+        if not any(entry.get("name") == "ocr" for entry in chain):
+            ocr_params = self.all_params.get("ocr")
+            if ocr_params is not None:
+                ocr_params["_last_ocr_texts"] = ""
+                ocr_params["_last_ocr_translated"] = ""
 
     def update_filter_params(self, filter_name: str, params: dict):
         """Update the params for a specific filter in the chain.
@@ -332,8 +370,9 @@ class ImageProcessor:
         result = frame
         for entry in self.filter_chain:
             name = entry["name"]
-            # Merge stored params with per-entry overrides
-            merged_params = {**self.all_params.get(name, {}), **entry.get("params", {})}
+            # Keep the same params dict alive so filters can cache heavy state.
+            merged_params = self.all_params.setdefault(name, {})
+            merged_params.update(entry.get("params", {}))
             # Propagate template_img from legacy store (object_counter needs it)
             if "template_img" in self.filter_params:
                 merged_params.setdefault("template_img", self.filter_params["template_img"])
@@ -342,3 +381,8 @@ class ImageProcessor:
                 result = fn(result, merged_params)
 
         return result
+
+    def get_ocr_texts(self) -> tuple[str, str]:
+        """Return the last OCR texts produced by the OCR filter."""
+        params = self.all_params.get("ocr", {})
+        return params.get("_last_ocr_texts", ""), params.get("_last_ocr_translated", "")

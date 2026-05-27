@@ -6,6 +6,7 @@ from core.processing import ImageProcessor
 from core.capture import CaptureThread
 from ui.glass_window import GlassWindow
 from ui.control_window import ControlWindow
+from ui.ocr_text_window import OcrTextWindow
 
 class GlassCV:
     def __init__(self):
@@ -28,6 +29,7 @@ class GlassCV:
             border_color=QColor(255, 165, 0)
         )
         self.control = ControlWindow()
+        self.ocr_text_window = OcrTextWindow()
         
         # 4. Connect Signals
         self._connect_signals()
@@ -45,6 +47,7 @@ class GlassCV:
         # --- Capture Thread -> UI ---
         # The thread emits a numpy array (processed frame)
         self.capture_thread.frame_ready.connect(self._on_frame_ready)
+        self.capture_thread.ocr_text_ready.connect(self._on_ocr_text_ready)
         
         # --- Control Window -> Capture Thread ---
         self.control.mode_changed.connect(self._set_continuous_mode)
@@ -53,6 +56,7 @@ class GlassCV:
         
         # --- Control Window -> Processor (chain-based) ---
         self.control.filter_chain_changed.connect(self.processor.set_filter_chain)
+        self.control.filter_chain_changed.connect(self._on_filter_chain_changed)
         self.control.filter_params_changed_for.connect(self.processor.update_filter_params)
         
         # --- Control Window -> Glass Window ---
@@ -77,6 +81,18 @@ class GlassCV:
             # Update both windows
             self.control.update_image(qimg)
             self.glass.update_image(qimg)
+
+    def _on_ocr_text_ready(self, original: str, translated: str):
+        if self.ocr_text_window.isVisible():
+            self.ocr_text_window.update_texts(original, translated or None)
+
+    def _on_filter_chain_changed(self, chain: list[dict]):
+        has_ocr = any(entry.get("name") == "ocr" for entry in chain)
+        if has_ocr:
+            self.ocr_text_window.show()
+        else:
+            self.ocr_text_window.update_texts("", None)
+            self.ocr_text_window.hide()
 
     def run(self):
         exit_code = self.app.exec()

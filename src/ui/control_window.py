@@ -1,11 +1,13 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox,
-    QStackedWidget, QApplication, QListWidget, QAbstractItemView, QListWidgetItem
+    QStackedWidget, QApplication, QListWidget, QAbstractItemView, QListWidgetItem,
+    QColorDialog, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 
+from core.ocr import OCR_LANGUAGES, TRANSLATION_LANGUAGES
 from core.processing import FILTER_DISPLAY_NAMES
 
 
@@ -20,7 +22,11 @@ _FILTER_PARAM_KEYS = {
     "smart_inverter": ["intensity"],
     "symmetry":       ["symmetry_axis"],
     "yolo":           ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
-    "ocr":            ["ocr_langs", "ocr_conf"],
+    "ocr":            [
+        "ocr_langs", "ocr_conf", "ocr_font_color", "ocr_font_size",
+        "ocr_hide_overlay", "ocr_translate_enabled", "ocr_translate_target",
+        "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity",
+    ],
 }
 
 
@@ -60,6 +66,8 @@ class ControlWindow(QWidget):
         self.setWindowTitle("GlassCV - Control Panel")
         self.setMinimumSize(460, 840)
         self._current_pixmap = None
+        self._ocr_font_color = (255, 0, 0)
+        self._ocr_subtitle_bg_color = (0, 0, 0)
         self._setup_ui()
         self._apply_styles()
 
@@ -394,7 +402,8 @@ class ControlWindow(QWidget):
         # Language combo
         ocr_lang_row = QHBoxLayout()
         self.combo_ocr_lang = QComboBox()
-        self.combo_ocr_lang.addItems(["en", "es", "fr", "de"])
+        for name, easyocr_code, _ in OCR_LANGUAGES:
+            self.combo_ocr_lang.addItem(f"{name} ({easyocr_code})", userData=easyocr_code)
         self.combo_ocr_lang.currentTextChanged.connect(self._on_ocr_params_changed)
         ocr_lang_row.addWidget(QLabel("Language:"))
         ocr_lang_row.addWidget(self.combo_ocr_lang)
@@ -408,10 +417,70 @@ class ControlWindow(QWidget):
         self.slider_ocr_conf.valueChanged.connect(self._on_ocr_params_changed)
         ocr_conf_row.addWidget(self.lbl_ocr_conf)
         ocr_conf_row.addWidget(self.slider_ocr_conf)
+
+        # Font color
+        ocr_font_color_row = QHBoxLayout()
+        self.btn_ocr_font_color = QPushButton("Font Color")
+        self.btn_ocr_font_color.clicked.connect(self._on_ocr_font_color_clicked)
+        self._update_color_button(self.btn_ocr_font_color, self._ocr_font_color)
+        ocr_font_color_row.addWidget(QLabel("Overlay Text:"))
+        ocr_font_color_row.addWidget(self.btn_ocr_font_color)
+
+        # Font size
+        ocr_font_size_row = QHBoxLayout()
+        self.spin_ocr_font_size = QSpinBox()
+        self.spin_ocr_font_size.setRange(8, 72)
+        self.spin_ocr_font_size.setValue(16)
+        self.spin_ocr_font_size.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_font_size_row.addWidget(QLabel("Font Size:"))
+        ocr_font_size_row.addWidget(self.spin_ocr_font_size)
+
+        # Overlay and translation toggles
+        ocr_toggle_row = QHBoxLayout()
+        self.chk_ocr_hide_overlay = QCheckBox("Hide Overlay")
+        self.chk_ocr_hide_overlay.toggled.connect(self._on_ocr_params_changed)
+        self.chk_ocr_translate = QCheckBox("Enable Translation")
+        self.chk_ocr_translate.toggled.connect(self._on_ocr_translation_toggled)
+        ocr_toggle_row.addWidget(self.chk_ocr_hide_overlay)
+        ocr_toggle_row.addWidget(self.chk_ocr_translate)
+
+        # Target language
+        ocr_target_row = QHBoxLayout()
+        self.combo_ocr_translate_target = QComboBox()
+        for name, code in TRANSLATION_LANGUAGES:
+            self.combo_ocr_translate_target.addItem(f"{name} ({code})", userData=code)
+        self.combo_ocr_translate_target.setCurrentIndex(1)
+        self.combo_ocr_translate_target.currentTextChanged.connect(self._on_ocr_params_changed)
+        ocr_target_row.addWidget(QLabel("Target Language:"))
+        ocr_target_row.addWidget(self.combo_ocr_translate_target)
+
+        # Subtitle background
+        ocr_bg_color_row = QHBoxLayout()
+        self.btn_ocr_bg_color = QPushButton("Background Color")
+        self.btn_ocr_bg_color.clicked.connect(self._on_ocr_bg_color_clicked)
+        self._update_color_button(self.btn_ocr_bg_color, self._ocr_subtitle_bg_color)
+        ocr_bg_color_row.addWidget(QLabel("Subtitle Bg:"))
+        ocr_bg_color_row.addWidget(self.btn_ocr_bg_color)
+
+        ocr_bg_opacity_row = QHBoxLayout()
+        self.lbl_ocr_bg_opacity = QLabel("Bg Opacity (0-100%): 70")
+        self.slider_ocr_bg_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ocr_bg_opacity.setRange(0, 100)
+        self.slider_ocr_bg_opacity.setValue(70)
+        self.slider_ocr_bg_opacity.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_bg_opacity_row.addWidget(self.lbl_ocr_bg_opacity)
+        ocr_bg_opacity_row.addWidget(self.slider_ocr_bg_opacity)
         
         ocr_layout.addLayout(ocr_lang_row)
         ocr_layout.addLayout(ocr_conf_row)
+        ocr_layout.addLayout(ocr_font_color_row)
+        ocr_layout.addLayout(ocr_font_size_row)
+        ocr_layout.addLayout(ocr_toggle_row)
+        ocr_layout.addLayout(ocr_target_row)
+        ocr_layout.addLayout(ocr_bg_color_row)
+        ocr_layout.addLayout(ocr_bg_opacity_row)
         self.stacked_params.addWidget(self.ocr_page)
+        self._on_ocr_translation_toggled(False)
 
         # Map filter name -> param page widget
         self._param_page_map = {
@@ -713,12 +782,53 @@ class ControlWindow(QWidget):
         })
         self._update_yolo_combo()
 
+    def _bgr_to_qcolor(self, bgr: tuple[int, int, int]) -> QColor:
+        return QColor(bgr[2], bgr[1], bgr[0])
+
+    def _qcolor_to_bgr(self, color: QColor) -> tuple[int, int, int]:
+        return (color.blue(), color.green(), color.red())
+
+    def _update_color_button(self, button: QPushButton, bgr: tuple[int, int, int]):
+        color = self._bgr_to_qcolor(bgr)
+        button.setStyleSheet(
+            f"background-color: {color.name()}; color: #fff; border: 1px solid #777;"
+        )
+
+    def _on_ocr_font_color_clicked(self):
+        color = QColorDialog.getColor(self._bgr_to_qcolor(self._ocr_font_color), self, "Select OCR Font Color")
+        if color.isValid():
+            self._ocr_font_color = self._qcolor_to_bgr(color)
+            self._update_color_button(self.btn_ocr_font_color, self._ocr_font_color)
+            self._on_ocr_params_changed()
+
+    def _on_ocr_bg_color_clicked(self):
+        color = QColorDialog.getColor(self._bgr_to_qcolor(self._ocr_subtitle_bg_color), self, "Select Subtitle Background")
+        if color.isValid():
+            self._ocr_subtitle_bg_color = self._qcolor_to_bgr(color)
+            self._update_color_button(self.btn_ocr_bg_color, self._ocr_subtitle_bg_color)
+            self._on_ocr_params_changed()
+
+    def _on_ocr_translation_toggled(self, checked: bool):
+        self.combo_ocr_translate_target.setEnabled(checked)
+        self.btn_ocr_bg_color.setEnabled(checked)
+        self.slider_ocr_bg_opacity.setEnabled(checked)
+        self._on_ocr_params_changed()
+
     def _on_ocr_params_changed(self):
         conf = self.slider_ocr_conf.value()
+        bg_opacity = self.slider_ocr_bg_opacity.value()
         self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
+        self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
         self._emit_filter_params({
-            "ocr_langs": [self.combo_ocr_lang.currentText()],
+            "ocr_langs": [self.combo_ocr_lang.currentData() or "en"],
             "ocr_conf": conf,
+            "ocr_font_color": self._ocr_font_color,
+            "ocr_font_size": self.spin_ocr_font_size.value(),
+            "ocr_hide_overlay": self.chk_ocr_hide_overlay.isChecked(),
+            "ocr_translate_enabled": self.chk_ocr_translate.isChecked(),
+            "ocr_translate_target": self.combo_ocr_translate_target.currentData() or "es",
+            "ocr_subtitle_bg_color": self._ocr_subtitle_bg_color,
+            "ocr_subtitle_bg_opacity": bg_opacity,
         })
 
     # ------------------------------------------------------------------
