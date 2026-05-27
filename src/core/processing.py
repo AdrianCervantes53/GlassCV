@@ -1,5 +1,30 @@
 import cv2
 import numpy as np
+import time
+
+# ---------------------------------------------------------------------------
+# Lazy AI Models
+# ---------------------------------------------------------------------------
+_YOLO_MODEL = None
+_YOLO_MODEL_PATH = None
+_OCR_READER = None
+_OCR_LANGS = None
+
+def get_yolo_model(model_path):
+    global _YOLO_MODEL, _YOLO_MODEL_PATH
+    if _YOLO_MODEL is None or _YOLO_MODEL_PATH != model_path:
+        from ultralytics import YOLO
+        _YOLO_MODEL = YOLO(model_path)
+        _YOLO_MODEL_PATH = model_path
+    return _YOLO_MODEL
+
+def get_ocr_reader(langs):
+    global _OCR_READER, _OCR_LANGS
+    if _OCR_READER is None or _OCR_LANGS != langs:
+        import easyocr
+        _OCR_READER = easyocr.Reader(langs)
+        _OCR_LANGS = langs
+    return _OCR_READER
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +173,59 @@ def apply_smart_inverter(frame: np.ndarray, params: dict) -> np.ndarray:
     return cv2.cvtColor(hsv_blended, cv2.COLOR_HSV2BGR)
 
 
+def apply_yolo(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    model_path = params.get("yolo_model", "yolo11n.pt")
+    confidence = params.get("yolo_conf", 50) / 100.0
+    iou = params.get("yolo_iou", 45) / 100.0
+    show_labels = params.get("yolo_labels", True)
+    show_conf = params.get("yolo_show_conf", True)
+    
+    try:
+        model = get_yolo_model(model_path)
+        results = model(bgr, conf=confidence, iou=iou, verbose=False)
+        annotated_frame = results[0].plot(labels=show_labels, conf=show_conf)
+        return annotated_frame
+    except Exception as e:
+        cv2.putText(bgr, f"YOLO Error: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        return bgr
+
+
+def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    langs = params.get("ocr_langs", ["en"])
+    confidence_thresh = params.get("ocr_conf", 50) / 100.0
+    
+    # Throttling logic
+    current_time = time.time()
+    last_time = params.get("_last_ocr_time", 0)
+    # OCR is slow, let's limit to 2 FPS max (0.5s per frame)
+    if current_time - last_time > 0.5:
+        try:
+            reader = get_ocr_reader(langs)
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            results = reader.readtext(gray)
+            params["_last_ocr_results"] = results
+            params["_last_ocr_time"] = current_time
+        except Exception as e:
+            cv2.putText(bgr, f"OCR Error: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return bgr
+    
+    results = params.get("_last_ocr_results", [])
+    annotated_frame = bgr.copy()
+    for (bbox, text, prob) in results:
+        if prob >= confidence_thresh:
+            # bbox is a list of 4 points: [top_left, top_right, bottom_right, bottom_left]
+            (tl, tr, br, bl) = bbox
+            tl = (int(tl[0]), int(tl[1]))
+            br = (int(br[0]), int(br[1]))
+            cv2.rectangle(annotated_frame, tl, br, (255, 0, 0), 2)
+            cv2.putText(annotated_frame, f"{text} ({prob:.2f})", (tl[0], tl[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+    return annotated_frame
+
+
+
 # ---------------------------------------------------------------------------
 # Registry: maps filter name -> function
 # ---------------------------------------------------------------------------
@@ -163,6 +241,8 @@ FILTER_REGISTRY = {
     "colorblind":     apply_colorblind,
     "object_counter": apply_object_counter,
     "smart_inverter": apply_smart_inverter,
+    "yolo":           apply_yolo,
+    "ocr":            apply_ocr,
 }
 
 # Human-readable display names
@@ -178,6 +258,8 @@ FILTER_DISPLAY_NAMES = {
     "colorblind":     "Colorblind Sim.",
     "object_counter": "Object Counter",
     "smart_inverter": "Smart Inverter",
+    "yolo":           "YOLO Object Detection",
+    "ocr":            "EasyOCR Text Recognition",
 }
 
 

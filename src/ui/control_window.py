@@ -19,6 +19,8 @@ _FILTER_PARAM_KEYS = {
     "object_counter": ["confidence"],
     "smart_inverter": ["intensity"],
     "symmetry":       ["symmetry_axis"],
+    "yolo":           ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
+    "ocr":            ["ocr_langs", "ocr_conf"],
 }
 
 
@@ -46,6 +48,7 @@ class ControlWindow(QWidget):
         "normal", "grayscale", "canny", "mirror", "symmetry",
         "rgb_mixer", "binary", "pixelated",
         "colorblind", "object_counter", "smart_inverter",
+        "yolo", "ocr",
     ]
 
     def __init__(self):
@@ -326,6 +329,81 @@ class ControlWindow(QWidget):
         sym_layout.addWidget(self.combo_sym)
         self.stacked_params.addWidget(self.sym_page)
 
+        # ── YOLO ──────────────────────────────────────────────────────
+        self.yolo_page = QWidget()
+        yolo_layout = QVBoxLayout(self.yolo_page)
+        
+        # Model selector
+        yolo_model_row = QHBoxLayout()
+        self.btn_yolo_model = QPushButton("Select Model (.pt)")
+        self.btn_yolo_model.clicked.connect(self._on_yolo_select_model)
+        self.lbl_yolo_model = QLabel("yolo11n.pt")
+        yolo_model_row.addWidget(self.btn_yolo_model)
+        yolo_model_row.addWidget(self.lbl_yolo_model)
+        
+        # Confidence slider
+        yolo_conf_row = QHBoxLayout()
+        self.lbl_yolo_conf = QLabel("Conf (1-100%): 50")
+        self.slider_yolo_conf = QSlider(Qt.Orientation.Horizontal)
+        self.slider_yolo_conf.setRange(1, 100)
+        self.slider_yolo_conf.setValue(50)
+        self.slider_yolo_conf.valueChanged.connect(self._on_yolo_params_changed)
+        yolo_conf_row.addWidget(self.lbl_yolo_conf)
+        yolo_conf_row.addWidget(self.slider_yolo_conf)
+
+        # IOU slider
+        yolo_iou_row = QHBoxLayout()
+        self.lbl_yolo_iou = QLabel("IOU (1-100%): 45")
+        self.slider_yolo_iou = QSlider(Qt.Orientation.Horizontal)
+        self.slider_yolo_iou.setRange(1, 100)
+        self.slider_yolo_iou.setValue(45)
+        self.slider_yolo_iou.valueChanged.connect(self._on_yolo_params_changed)
+        yolo_iou_row.addWidget(self.lbl_yolo_iou)
+        yolo_iou_row.addWidget(self.slider_yolo_iou)
+        
+        # Checkboxes for labels
+        yolo_chk_row = QHBoxLayout()
+        self.chk_yolo_labels = QCheckBox("Show Labels")
+        self.chk_yolo_labels.setChecked(True)
+        self.chk_yolo_labels.toggled.connect(self._on_yolo_params_changed)
+        self.chk_yolo_show_conf = QCheckBox("Show Confidences")
+        self.chk_yolo_show_conf.setChecked(True)
+        self.chk_yolo_show_conf.toggled.connect(self._on_yolo_params_changed)
+        yolo_chk_row.addWidget(self.chk_yolo_labels)
+        yolo_chk_row.addWidget(self.chk_yolo_show_conf)
+        
+        yolo_layout.addLayout(yolo_model_row)
+        yolo_layout.addLayout(yolo_conf_row)
+        yolo_layout.addLayout(yolo_iou_row)
+        yolo_layout.addLayout(yolo_chk_row)
+        self.stacked_params.addWidget(self.yolo_page)
+
+        # ── OCR ───────────────────────────────────────────────────────
+        self.ocr_page = QWidget()
+        ocr_layout = QVBoxLayout(self.ocr_page)
+        
+        # Language combo
+        ocr_lang_row = QHBoxLayout()
+        self.combo_ocr_lang = QComboBox()
+        self.combo_ocr_lang.addItems(["en", "es", "fr", "de"])
+        self.combo_ocr_lang.currentTextChanged.connect(self._on_ocr_params_changed)
+        ocr_lang_row.addWidget(QLabel("Language:"))
+        ocr_lang_row.addWidget(self.combo_ocr_lang)
+        
+        # Confidence slider
+        ocr_conf_row = QHBoxLayout()
+        self.lbl_ocr_conf = QLabel("Conf (1-100%): 50")
+        self.slider_ocr_conf = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ocr_conf.setRange(1, 100)
+        self.slider_ocr_conf.setValue(50)
+        self.slider_ocr_conf.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_conf_row.addWidget(self.lbl_ocr_conf)
+        ocr_conf_row.addWidget(self.slider_ocr_conf)
+        
+        ocr_layout.addLayout(ocr_lang_row)
+        ocr_layout.addLayout(ocr_conf_row)
+        self.stacked_params.addWidget(self.ocr_page)
+
         # Map filter name -> param page widget
         self._param_page_map = {
             "canny":          self.canny_page,
@@ -336,6 +414,8 @@ class ControlWindow(QWidget):
             "object_counter": self.obj_page,
             "smart_inverter": self.inv_page,
             "symmetry":       self.sym_page,
+            "yolo":           self.yolo_page,
+            "ocr":            self.ocr_page,
         }
 
     # ------------------------------------------------------------------
@@ -568,6 +648,42 @@ class ControlWindow(QWidget):
 
     def _on_sym_params_changed(self):
         self._emit_filter_params({"symmetry_axis": self.combo_sym.currentText()})
+
+    def _on_yolo_select_model(self):
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Select YOLO Model", "", "YOLO Models (*.pt);;All Files (*)"
+        )
+        if file_name:
+            import os
+            self.lbl_yolo_model.setText(os.path.basename(file_name))
+            self.lbl_yolo_model.setToolTip(file_name)
+            self._on_yolo_params_changed()
+
+    def _on_yolo_params_changed(self):
+        model_text = self.lbl_yolo_model.text()
+        tooltip = self.lbl_yolo_model.toolTip()
+        path = tooltip if tooltip else model_text
+        
+        conf = self.slider_yolo_conf.value()
+        iou = self.slider_yolo_iou.value()
+        self.lbl_yolo_conf.setText(f"Conf (1-100%): {conf}")
+        self.lbl_yolo_iou.setText(f"IOU (1-100%): {iou}")
+        
+        self._emit_filter_params({
+            "yolo_model": path,
+            "yolo_conf": conf,
+            "yolo_iou": iou,
+            "yolo_labels": self.chk_yolo_labels.isChecked(),
+            "yolo_show_conf": self.chk_yolo_show_conf.isChecked(),
+        })
+
+    def _on_ocr_params_changed(self):
+        conf = self.slider_ocr_conf.value()
+        self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
+        self._emit_filter_params({
+            "ocr_langs": [self.combo_ocr_lang.currentText()],
+            "ocr_conf": conf,
+        })
 
     # ------------------------------------------------------------------
     # Other slot handlers
