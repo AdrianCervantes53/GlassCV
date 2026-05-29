@@ -9,4 +9,7 @@ dependencies = [
     "numpy>=2.4.5",
     "opencv-python>=4.13.0.92",
     "pyqt6>=6.11.0",
+    "ultralytics>=8.3.0",
+    "easyocr>=1.7.2",
+    "deep-translator>=1.11.4",
 ]

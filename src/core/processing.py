@@ -1,5 +1,32 @@
 import cv2
 import numpy as np
+import time
+
+from core.ocr import draw_box_overlay, draw_text_overlay, get_translation_source_lang, translate_text
+
+# ---------------------------------------------------------------------------
+# Lazy AI Models
+# ---------------------------------------------------------------------------
+_YOLO_MODEL = None
+_YOLO_MODEL_PATH = None
+_OCR_READER = None
+_OCR_LANGS = None
+
+def get_yolo_model(model_path):
+    global _YOLO_MODEL, _YOLO_MODEL_PATH
+    if _YOLO_MODEL is None or _YOLO_MODEL_PATH != model_path:
+        from ultralytics import YOLO
+        _YOLO_MODEL = YOLO(model_path)
+        _YOLO_MODEL_PATH = model_path
+    return _YOLO_MODEL
+
+def get_ocr_reader(langs):
+    global _OCR_READER, _OCR_LANGS
+    if _OCR_READER is None or _OCR_LANGS != langs:
+        import easyocr
+        _OCR_READER = easyocr.Reader(langs)
+        _OCR_LANGS = langs
+    return _OCR_READER
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +175,97 @@ def apply_smart_inverter(frame: np.ndarray, params: dict) -> np.ndarray:
     return cv2.cvtColor(hsv_blended, cv2.COLOR_HSV2BGR)
 
 
+def apply_yolo(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    model_path = params.get("yolo_model", "yolo11n.pt")
+    confidence = params.get("yolo_conf", 50) / 100.0
+    iou = params.get("yolo_iou", 45) / 100.0
+    show_labels = params.get("yolo_labels", True)
+    show_conf = params.get("yolo_show_conf", True)
+    
+    try:
+        model = get_yolo_model(model_path)
+        results = model(bgr, conf=confidence, iou=iou, verbose=False)
+        annotated_frame = results[0].plot(labels=show_labels, conf=show_conf)
+        return annotated_frame
+    except Exception as e:
+        cv2.putText(bgr, f"YOLO Error: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        return bgr
+
+
+def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
+    bgr = _to_bgr(frame)
+    langs = params.get("ocr_langs", ["en"])
+    confidence_thresh = params.get("ocr_conf", 50) / 100.0
+    font_color = params.get("ocr_font_color", (255, 255, 255))
+    font_size = params.get("ocr_font_size", 14)
+    font_scale = max(0.3, font_size / 24.0)
+    font_thickness = params.get("ocr_font_thickness", 1)
+    text_position = params.get("ocr_text_position", "above")
+    box_thickness = params.get("ocr_box_thickness", 1)
+    show_text = params.get("ocr_show_text", True)
+    show_boxes = params.get("ocr_show_boxes", True)
+    text_background = params.get("ocr_text_background", True)
+    overlay_text_source = params.get("ocr_overlay_text_source", "original")
+    translate_target = params.get("ocr_translate_target", "es")
+    subtitle_bg_color = params.get("ocr_subtitle_bg_color", (0, 0, 0))
+    subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 100)
+    
+    # Throttling logic
+    current_time = time.time()
+    last_time = params.get("_last_ocr_time", 0)
+    # OCR is slow, let's limit to 2 FPS max (0.5s per frame)
+    if current_time - last_time > 0.5:
+        try:
+            reader = get_ocr_reader(langs)
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            results = reader.readtext(gray)
+            params["_last_ocr_results"] = results
+            params["_last_ocr_time"] = current_time
+        except Exception as e:
+            params["_last_ocr_texts"] = ""
+            params["_last_ocr_translated"] = ""
+            cv2.putText(bgr, f"OCR Error: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return bgr
+    
+    results = params.get("_last_ocr_results", [])
+    translation_by_text = params.get("_last_ocr_translations", {})
+    annotated_frame = bgr.copy()
+    original_texts = []
+    translated_texts = []
+
+    for (bbox, text, prob) in results:
+        if prob >= confidence_thresh:
+            original_texts.append(text)
+            translated = translation_by_text.get((text, translate_target), "")
+            if translated:
+                translated_texts.append(translated)
+
+            if show_boxes:
+                draw_box_overlay(annotated_frame, bbox, font_color, box_thickness)
+
+            if show_text:
+                base_text = translated if overlay_text_source == "translation" and translated else text
+                overlay_text = f"{base_text} ({prob:.2f})"
+                bg_color = subtitle_bg_color if text_background else None
+                draw_text_overlay(
+                    annotated_frame,
+                    bbox,
+                    overlay_text,
+                    font_scale,
+                    font_color,
+                    font_thickness,
+                    text_position,
+                    bg_color,
+                    subtitle_bg_opacity,
+                )
+
+    params["_last_ocr_texts"] = "\n".join(original_texts)
+    params["_last_ocr_translated"] = "\n".join(translated_texts)
+    return annotated_frame
+
+
+
 # ---------------------------------------------------------------------------
 # Registry: maps filter name -> function
 # ---------------------------------------------------------------------------
@@ -163,6 +281,8 @@ FILTER_REGISTRY = {
     "colorblind":     apply_colorblind,
     "object_counter": apply_object_counter,
     "smart_inverter": apply_smart_inverter,
+    "yolo":           apply_yolo,
+    "ocr":            apply_ocr,
 }
 
 # Human-readable display names
@@ -178,6 +298,8 @@ FILTER_DISPLAY_NAMES = {
     "colorblind":     "Colorblind Sim.",
     "object_counter": "Object Counter",
     "smart_inverter": "Smart Inverter",
+    "yolo":           "YOLO Object Detection",
+    "ocr":            "EasyOCR Text Recognition",
 }
 
 
@@ -207,6 +329,11 @@ class ImageProcessor:
         chain is a list of {"name": str, "params": dict} entries.
         """
         self.filter_chain = chain
+        if not any(entry.get("name") == "ocr" for entry in chain):
+            ocr_params = self.all_params.get("ocr")
+            if ocr_params is not None:
+                ocr_params["_last_ocr_texts"] = ""
+                ocr_params["_last_ocr_translated"] = ""
 
     def update_filter_params(self, filter_name: str, params: dict):
         """Update the params for a specific filter in the chain.
@@ -250,8 +377,9 @@ class ImageProcessor:
         result = frame
         for entry in self.filter_chain:
             name = entry["name"]
-            # Merge stored params with per-entry overrides
-            merged_params = {**self.all_params.get(name, {}), **entry.get("params", {})}
+            # Keep the same params dict alive so filters can cache heavy state.
+            merged_params = self.all_params.setdefault(name, {})
+            merged_params.update(entry.get("params", {}))
             # Propagate template_img from legacy store (object_counter needs it)
             if "template_img" in self.filter_params:
                 merged_params.setdefault("template_img", self.filter_params["template_img"])
@@ -260,3 +388,42 @@ class ImageProcessor:
                 result = fn(result, merged_params)
 
         return result
+
+    def get_ocr_texts(self) -> tuple[str, str]:
+        """Return the last OCR texts produced by the OCR filter."""
+        params = self.all_params.get("ocr", {})
+        return params.get("_last_ocr_texts", ""), params.get("_last_ocr_translated", "")
+
+    def translate_last_ocr(self) -> tuple[str, str, str]:
+        """Translate the latest OCR results without triggering a new OCR pass."""
+        params = self.all_params.setdefault("ocr", {})
+        original = params.get("_last_ocr_texts", "")
+        if not original.strip():
+            return "", "", "No OCR text detected yet."
+
+        langs = params.get("ocr_langs", ["en"])
+        confidence_thresh = params.get("ocr_conf", 50) / 100.0
+        source_lang = get_translation_source_lang(langs)
+        target_lang = params.get("ocr_translate_target", "es")
+        translation_cache = params.setdefault("_ocr_translation_cache", {})
+        translation_by_text = params.setdefault("_last_ocr_translations", {})
+        results = params.get("_last_ocr_results", [])
+
+        translated_texts = []
+        if results:
+            for _, text, prob in results:
+                if prob >= confidence_thresh:
+                    translated = translate_text(text, source_lang, target_lang, translation_cache)
+                    translation_by_text[(text, target_lang)] = translated
+                    translated_texts.append(translated)
+        else:
+            for text in original.splitlines():
+                translated = translate_text(text, source_lang, target_lang, translation_cache)
+                translation_by_text[(text, target_lang)] = translated
+                translated_texts.append(translated)
+
+        translated = "\n".join(translated_texts)
+        params["_last_ocr_translated"] = translated
+        if any(text.startswith("[Translation error:") for text in translated_texts):
+            return original, translated, "Translation failed. Check connection or selected languages."
+        return original, translated, ""

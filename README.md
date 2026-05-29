@@ -1,18 +1,27 @@
 # GlassCV
 
-GlassCV is a high-performance desktop application focused on real-time screen capture and processing. It is built using Python, PyQt6, and OpenCV, with a primary focus on low latency and efficient processing.
+GlassCV is a high-performance desktop application focused on real-time screen capture, processing, and AI-powered analysis. It is built using Python, PyQt6, OpenCV, and deep learning frameworks (YOLO, EasyOCR), with a primary focus on low latency and GPU-accelerated processing.
 
 ## Key Features
 
 - **Dual Window Architecture**: 
   - **Glass Overlay**: A transparent, draggable, and resizable overlay that allows you to select the exact region of the screen you want to capture.
-  - **Control Panel**: A dedicated interface to manage captures and configure the application without interfering with your viewing area.
+  - **Control Panel**: A dedicated interface to manage captures, configure filters, and control AI models without interfering with your viewing area.
 - **Ultra-fast Screen Capture**: Uses `mss` for the best performance and lowest latency in screen capturing, ensuring a continuous stream.
 - **Multithreaded Processing**: Image capture and processing are performed in separate background threads (multithreading) to prevent any UI lag.
 - **HiDPI Support**: Advanced support for screens with different DPI scales, ensuring that capture coordinates are accurate across any monitor configuration.
-- **AI and Computer Vision Ready**: The codebase is structured to scale easily and integrate computer vision models in the future, such as YOLO, for real-time analysis of the captured region.
 - **Real-time Image Processing & Filter Chain**: Apply and chain various built-in OpenCV filters (e.g., Grayscale, Canny Edges, RGB Mixer, Colorblind Simulation, Smart Inverter) directly from the Control Panel.
 - **Template Matching & Object Counting**: Use a dedicated "Template Glass" window to capture a visual template and perform real-time object detection and counting within the main capture region.
+- **YOLO Object Detection**: Real-time object detection powered by Ultralytics YOLO, with GPU acceleration (CUDA). Features include:
+  - Dynamic model selector with auto-download — choose from YOLO11 (Nano to XLarge) and YOLOv8 (Nano to Medium) directly from a dropdown menu.
+  - Models are automatically downloaded the first time they are selected and stored in the `models/` directory.
+  - The dropdown clearly indicates which models are already downloaded (`Descargado`).
+  - Support for loading custom-trained `.pt` models via a file dialog.
+  - Adjustable Confidence and IOU thresholds, with toggles for showing labels and confidence scores on detections.
+- **EasyOCR Text Recognition**: Real-time text detection and recognition using EasyOCR with GPU acceleration. Features include:
+  - Built-in throttling mechanism (max 2 FPS) to maintain a smooth video feed while performing OCR.
+  - Adjustable confidence threshold and language selection.
+- **GPU Acceleration**: Full NVIDIA CUDA support via PyTorch. AI models (YOLO and EasyOCR) automatically detect and utilize your GPU for maximum performance.
 
 ## Technologies Used
 
@@ -21,6 +30,9 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
 - **OpenCV (`opencv-python`)**: For processing captured images.
 - **MSS (`mss`)**: For extremely low-latency, cross-platform screen capture.
 - **NumPy**: For efficient manipulation of pixel matrices and image data.
+- **Ultralytics (`ultralytics`)**: For YOLO object detection models.
+- **EasyOCR (`easyocr`)**: For optical character recognition (text detection).
+- **PyTorch (`torch`) with CUDA**: Deep learning backend with GPU acceleration.
 
 ## Installation
 
@@ -46,6 +58,11 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
    pip install -e .
    ```
 
+3. **(Optional) Enable GPU Acceleration**: By default, `pip install` installs the CPU-only version of PyTorch. To enable CUDA support for your NVIDIA GPU, reinstall PyTorch with the appropriate CUDA index:
+   ```bash
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 --upgrade --force-reinstall
+   ```
+
 ## Usage
 
 To run the application, execute the main script located in the `src` directory:
@@ -55,20 +72,36 @@ python src/main.py
 ```
 
 Upon launching, the following main windows will open:
-1. The **Control Panel**: From here you can control the workflow, configure filter chains, and manage options.
+1. The **Control Panel**: From here you can control the workflow, configure filter chains, select AI models, and manage options.
 2. The **Glass Window**: Drag and resize this transparent box over the specific area of your screen that you wish to capture and analyze.
+
 *Note: A third **Template Glass** window can be toggled from the Control Panel to capture specific visual templates for the Object Counter filter.*
+
+### Using YOLO Object Detection
+
+1. In the Filter Chain section, select **YOLO Object Detection** from the dropdown and click **＋ Add**.
+2. Choose a model from the **Model** dropdown (e.g., `yolo11n.pt`). If the model hasn't been downloaded yet, it will be fetched automatically on first use.
+3. Adjust the **Confidence** and **IOU** sliders to fine-tune detection sensitivity.
+4. Toggle **Show Labels** and **Show Confidences** to control what information is displayed on detections.
+5. To use a custom-trained model, click **Custom...** and select your `.pt` file.
+
+### Using EasyOCR Text Recognition
+
+1. In the Filter Chain section, select **EasyOCR Text Recognition** from the dropdown and click **＋ Add**.
+2. Select the target **Language** from the dropdown.
+3. Adjust the **Confidence** slider to filter out low-confidence text detections.
 
 ## Project Structure
 
 - `src/`
   - `main.py`: Main entry point of the application.
   - `ui/`: Modules containing the GUI logic (ControlWindow and GlassWindow).
-  - `core/`: Core logic, screen capture via `mss`, background thread image processing, geometry calculations, etc.
+  - `core/`: Core logic, screen capture via `mss`, background thread image processing, AI model integration, geometry calculations, etc.
+- `models/`: Directory where YOLO model weights (`.pt` files) are stored. Models are automatically downloaded here when selected for the first time.
 - `pyproject.toml`: Project configuration and dependencies.
 - `.gitignore`: Exclusion rules to prevent uploading temporary files, binaries, and virtual environments to the repository.
 
 ## Roadmap
-- Advanced deep learning model integration (e.g., YOLO) for robust real-time object detection.
 - Multi-monitor management improvements.
 - Exporting and importing functionality for custom filter chains.
+- Asynchronous model downloading with progress indicator in the UI.

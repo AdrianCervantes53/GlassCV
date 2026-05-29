@@ -6,6 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class CaptureThread(QThread):
     # Signal emitted every time a new frame is captured and processed
     frame_ready = pyqtSignal(np.ndarray)
+    ocr_text_ready = pyqtSignal(str, str)
 
     def __init__(self, processor):
         super().__init__()
@@ -54,6 +55,9 @@ class CaptureThread(QThread):
                             
                             # Emit
                             self.frame_ready.emit(processed_frame)
+                            if hasattr(self.processor, "get_ocr_texts"):
+                                original, translated = self.processor.get_ocr_texts()
+                                self.ocr_text_ready.emit(original, translated)
                     except Exception as e:
                         print(f"Capture error: {e}")
                     

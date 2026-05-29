@@ -1,4 +1,5 @@
 import sys
+from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from core.utils import enable_dpi_awareness, cv2_to_qimage
@@ -6,6 +7,23 @@ from core.processing import ImageProcessor
 from core.capture import CaptureThread
 from ui.glass_window import GlassWindow
 from ui.control_window import ControlWindow
+from ui.ocr_text_window import OcrTextWindow
+
+
+class OcrTranslationWorker(QThread):
+    translation_finished = pyqtSignal(str, str, str)
+
+    def __init__(self, processor):
+        super().__init__()
+        self.processor = processor
+
+    def run(self):
+        try:
+            original, translated, error = self.processor.translate_last_ocr()
+        except Exception as exc:
+            original, translated, error = "", "", str(exc)
+        self.translation_finished.emit(original, translated, error)
+
 
 class GlassCV:
     def __init__(self):
@@ -28,6 +46,8 @@ class GlassCV:
             border_color=QColor(255, 165, 0)
         )
         self.control = ControlWindow()
+        self.ocr_text_window = OcrTextWindow()
+        self.translation_worker = None
         
         # 4. Connect Signals
         self._connect_signals()
@@ -45,6 +65,8 @@ class GlassCV:
         # --- Capture Thread -> UI ---
         # The thread emits a numpy array (processed frame)
         self.capture_thread.frame_ready.connect(self._on_frame_ready)
+        self.capture_thread.ocr_text_ready.connect(self._on_ocr_text_ready)
+        self.ocr_text_window.translate_requested.connect(self._on_translate_requested)
         
         # --- Control Window -> Capture Thread ---
         self.control.mode_changed.connect(self._set_continuous_mode)
@@ -53,6 +75,7 @@ class GlassCV:
         
         # --- Control Window -> Processor (chain-based) ---
         self.control.filter_chain_changed.connect(self.processor.set_filter_chain)
+        self.control.filter_chain_changed.connect(self._on_filter_chain_changed)
         self.control.filter_params_changed_for.connect(self.processor.update_filter_params)
         
         # --- Control Window -> Glass Window ---
@@ -77,6 +100,44 @@ class GlassCV:
             # Update both windows
             self.control.update_image(qimg)
             self.glass.update_image(qimg)
+
+    def _on_ocr_text_ready(self, original: str, translated: str):
+        if self.ocr_text_window.isVisible():
+            self.ocr_text_window.update_texts(original, translated or None)
+
+    def _on_translate_requested(self):
+        if self.translation_worker is not None:
+            return
+
+        self.ocr_text_window.set_translating(True)
+        self.translation_worker = OcrTranslationWorker(self.processor)
+        self.translation_worker.translation_finished.connect(self._on_translation_finished)
+        self.translation_worker.finished.connect(self.translation_worker.deleteLater)
+        self.translation_worker.finished.connect(self._clear_translation_worker)
+        self.translation_worker.start()
+
+    def _on_translation_finished(self, original: str, translated: str, error: str):
+        self.ocr_text_window.set_translating(False)
+        if original or translated:
+            self.ocr_text_window.update_texts(original, translated or None)
+
+        if error:
+            self.ocr_text_window.set_translation_status(error)
+        elif translated:
+            self.ocr_text_window.set_translation_status("Translation ready.")
+        else:
+            self.ocr_text_window.set_translation_status("No OCR text detected.")
+
+    def _clear_translation_worker(self):
+        self.translation_worker = None
+
+    def _on_filter_chain_changed(self, chain: list[dict]):
+        has_ocr = any(entry.get("name") == "ocr" for entry in chain)
+        if has_ocr:
+            self.ocr_text_window.show()
+        else:
+            self.ocr_text_window.update_texts("", None)
+            self.ocr_text_window.hide()
 
     def run(self):
         exit_code = self.app.exec()
