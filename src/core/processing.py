@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import time
 
-from core.ocr import draw_text_overlay, get_translation_source_lang, translate_text
+from core.ocr import draw_box_overlay, draw_text_overlay, get_translation_source_lang, translate_text
 
 # ---------------------------------------------------------------------------
 # Lazy AI Models
@@ -200,8 +200,12 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     font_color = params.get("ocr_font_color", (255, 0, 0))
     font_size = params.get("ocr_font_size", 16)
     font_scale = max(0.3, font_size / 24.0)
-    hide_overlay = params.get("ocr_hide_overlay", False)
-    translate_enabled = params.get("ocr_translate_enabled", False)
+    font_thickness = params.get("ocr_font_thickness", 1)
+    box_thickness = params.get("ocr_box_thickness", 1)
+    show_text = params.get("ocr_show_text", True)
+    show_boxes = params.get("ocr_show_boxes", True)
+    text_background = params.get("ocr_text_background", False)
+    overlay_text_source = params.get("ocr_overlay_text_source", "original")
     translate_target = params.get("ocr_translate_target", "es")
     subtitle_bg_color = params.get("ocr_subtitle_bg_color", (0, 0, 0))
     subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 70)
@@ -224,8 +228,7 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
             return bgr
     
     results = params.get("_last_ocr_results", [])
-    translation_cache = params.setdefault("_ocr_translation_cache", {})
-    source_lang = get_translation_source_lang(langs)
+    translation_by_text = params.get("_last_ocr_translations", {})
     annotated_frame = bgr.copy()
     original_texts = []
     translated_texts = []
@@ -233,22 +236,24 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     for (bbox, text, prob) in results:
         if prob >= confidence_thresh:
             original_texts.append(text)
-            overlay_text = f"{text} ({prob:.2f})"
-            bg_color = None
-
-            if translate_enabled:
-                translated = translate_text(text, source_lang, translate_target, translation_cache)
+            translated = translation_by_text.get((text, translate_target), "")
+            if translated:
                 translated_texts.append(translated)
-                overlay_text = translated
-                bg_color = subtitle_bg_color
 
-            if not hide_overlay:
+            if show_boxes:
+                draw_box_overlay(annotated_frame, bbox, font_color, box_thickness)
+
+            if show_text:
+                base_text = translated if overlay_text_source == "translation" and translated else text
+                overlay_text = f"{base_text} ({prob:.2f})"
+                bg_color = subtitle_bg_color if text_background else None
                 draw_text_overlay(
                     annotated_frame,
                     bbox,
                     overlay_text,
                     font_scale,
                     font_color,
+                    font_thickness,
                     bg_color,
                     subtitle_bg_opacity,
                 )
@@ -386,3 +391,37 @@ class ImageProcessor:
         """Return the last OCR texts produced by the OCR filter."""
         params = self.all_params.get("ocr", {})
         return params.get("_last_ocr_texts", ""), params.get("_last_ocr_translated", "")
+
+    def translate_last_ocr(self) -> tuple[str, str, str]:
+        """Translate the latest OCR results without triggering a new OCR pass."""
+        params = self.all_params.setdefault("ocr", {})
+        original = params.get("_last_ocr_texts", "")
+        if not original.strip():
+            return "", "", "No OCR text detected yet."
+
+        langs = params.get("ocr_langs", ["en"])
+        confidence_thresh = params.get("ocr_conf", 50) / 100.0
+        source_lang = get_translation_source_lang(langs)
+        target_lang = params.get("ocr_translate_target", "es")
+        translation_cache = params.setdefault("_ocr_translation_cache", {})
+        translation_by_text = params.setdefault("_last_ocr_translations", {})
+        results = params.get("_last_ocr_results", [])
+
+        translated_texts = []
+        if results:
+            for _, text, prob in results:
+                if prob >= confidence_thresh:
+                    translated = translate_text(text, source_lang, target_lang, translation_cache)
+                    translation_by_text[(text, target_lang)] = translated
+                    translated_texts.append(translated)
+        else:
+            for text in original.splitlines():
+                translated = translate_text(text, source_lang, target_lang, translation_cache)
+                translation_by_text[(text, target_lang)] = translated
+                translated_texts.append(translated)
+
+        translated = "\n".join(translated_texts)
+        params["_last_ocr_translated"] = translated
+        if any(text.startswith("[Translation error:") for text in translated_texts):
+            return original, translated, "Translation failed. Check connection or selected languages."
+        return original, translated, ""

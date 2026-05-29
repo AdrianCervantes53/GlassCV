@@ -24,7 +24,8 @@ _FILTER_PARAM_KEYS = {
     "yolo":           ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
     "ocr":            [
         "ocr_langs", "ocr_conf", "ocr_font_color", "ocr_font_size",
-        "ocr_hide_overlay", "ocr_translate_enabled", "ocr_translate_target",
+        "ocr_font_thickness", "ocr_show_text", "ocr_show_boxes", "ocr_box_thickness",
+        "ocr_text_background", "ocr_overlay_text_source", "ocr_translate_target",
         "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity",
     ],
 }
@@ -435,14 +436,46 @@ class ControlWindow(QWidget):
         ocr_font_size_row.addWidget(QLabel("Font Size:"))
         ocr_font_size_row.addWidget(self.spin_ocr_font_size)
 
-        # Overlay and translation toggles
+        # Font thickness
+        ocr_font_thickness_row = QHBoxLayout()
+        self.spin_ocr_font_thickness = QSpinBox()
+        self.spin_ocr_font_thickness.setRange(1, 5)
+        self.spin_ocr_font_thickness.setValue(1)
+        self.spin_ocr_font_thickness.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_font_thickness_row.addWidget(QLabel("Font Thickness:"))
+        ocr_font_thickness_row.addWidget(self.spin_ocr_font_thickness)
+
+        # Overlay visibility toggles
         ocr_toggle_row = QHBoxLayout()
-        self.chk_ocr_hide_overlay = QCheckBox("Hide Overlay")
-        self.chk_ocr_hide_overlay.toggled.connect(self._on_ocr_params_changed)
-        self.chk_ocr_translate = QCheckBox("Enable Translation")
-        self.chk_ocr_translate.toggled.connect(self._on_ocr_translation_toggled)
-        ocr_toggle_row.addWidget(self.chk_ocr_hide_overlay)
-        ocr_toggle_row.addWidget(self.chk_ocr_translate)
+        self.chk_ocr_show_text = QCheckBox("Show Text")
+        self.chk_ocr_show_text.setChecked(True)
+        self.chk_ocr_show_text.toggled.connect(self._on_ocr_params_changed)
+        self.chk_ocr_show_boxes = QCheckBox("Show Boxes")
+        self.chk_ocr_show_boxes.setChecked(True)
+        self.chk_ocr_show_boxes.toggled.connect(self._on_ocr_params_changed)
+        self.chk_ocr_text_background = QCheckBox("Text Background")
+        self.chk_ocr_text_background.toggled.connect(self._on_ocr_text_background_toggled)
+        ocr_toggle_row.addWidget(self.chk_ocr_show_text)
+        ocr_toggle_row.addWidget(self.chk_ocr_show_boxes)
+        ocr_toggle_row.addWidget(self.chk_ocr_text_background)
+
+        # Box thickness
+        ocr_box_thickness_row = QHBoxLayout()
+        self.spin_ocr_box_thickness = QSpinBox()
+        self.spin_ocr_box_thickness.setRange(1, 5)
+        self.spin_ocr_box_thickness.setValue(1)
+        self.spin_ocr_box_thickness.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_box_thickness_row.addWidget(QLabel("Box Thickness:"))
+        ocr_box_thickness_row.addWidget(self.spin_ocr_box_thickness)
+
+        # Overlay text source
+        ocr_overlay_source_row = QHBoxLayout()
+        self.combo_ocr_overlay_source = QComboBox()
+        self.combo_ocr_overlay_source.addItem("Original", userData="original")
+        self.combo_ocr_overlay_source.addItem("Translation", userData="translation")
+        self.combo_ocr_overlay_source.currentTextChanged.connect(self._on_ocr_params_changed)
+        ocr_overlay_source_row.addWidget(QLabel("Overlay Text Source:"))
+        ocr_overlay_source_row.addWidget(self.combo_ocr_overlay_source)
 
         # Target language
         ocr_target_row = QHBoxLayout()
@@ -475,12 +508,15 @@ class ControlWindow(QWidget):
         ocr_layout.addLayout(ocr_conf_row)
         ocr_layout.addLayout(ocr_font_color_row)
         ocr_layout.addLayout(ocr_font_size_row)
+        ocr_layout.addLayout(ocr_font_thickness_row)
         ocr_layout.addLayout(ocr_toggle_row)
+        ocr_layout.addLayout(ocr_box_thickness_row)
+        ocr_layout.addLayout(ocr_overlay_source_row)
         ocr_layout.addLayout(ocr_target_row)
         ocr_layout.addLayout(ocr_bg_color_row)
         ocr_layout.addLayout(ocr_bg_opacity_row)
         self.stacked_params.addWidget(self.ocr_page)
-        self._on_ocr_translation_toggled(False)
+        self._on_ocr_text_background_toggled(False)
 
         # Map filter name -> param page widget
         self._param_page_map = {
@@ -808,8 +844,7 @@ class ControlWindow(QWidget):
             self._update_color_button(self.btn_ocr_bg_color, self._ocr_subtitle_bg_color)
             self._on_ocr_params_changed()
 
-    def _on_ocr_translation_toggled(self, checked: bool):
-        self.combo_ocr_translate_target.setEnabled(checked)
+    def _on_ocr_text_background_toggled(self, checked: bool):
         self.btn_ocr_bg_color.setEnabled(checked)
         self.slider_ocr_bg_opacity.setEnabled(checked)
         self._on_ocr_params_changed()
@@ -824,8 +859,12 @@ class ControlWindow(QWidget):
             "ocr_conf": conf,
             "ocr_font_color": self._ocr_font_color,
             "ocr_font_size": self.spin_ocr_font_size.value(),
-            "ocr_hide_overlay": self.chk_ocr_hide_overlay.isChecked(),
-            "ocr_translate_enabled": self.chk_ocr_translate.isChecked(),
+            "ocr_font_thickness": self.spin_ocr_font_thickness.value(),
+            "ocr_show_text": self.chk_ocr_show_text.isChecked(),
+            "ocr_show_boxes": self.chk_ocr_show_boxes.isChecked(),
+            "ocr_box_thickness": self.spin_ocr_box_thickness.value(),
+            "ocr_text_background": self.chk_ocr_text_background.isChecked(),
+            "ocr_overlay_text_source": self.combo_ocr_overlay_source.currentData() or "original",
             "ocr_translate_target": self.combo_ocr_translate_target.currentData() or "es",
             "ocr_subtitle_bg_color": self._ocr_subtitle_bg_color,
             "ocr_subtitle_bg_opacity": bg_opacity,

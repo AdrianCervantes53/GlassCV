@@ -82,49 +82,69 @@ def translate_text(text: str, source_lang: str, target_lang: str, cache: dict[tu
     return translated
 
 
+def get_bbox_rect(frame: np.ndarray, bbox) -> tuple[int, int, int, int]:
+    """Convert EasyOCR bbox points into a clamped rectangle."""
+    points = [(int(point[0]), int(point[1])) for point in bbox]
+    x_values = [point[0] for point in points]
+    y_values = [point[1] for point in points]
+    x1 = max(0, min(x_values))
+    x2 = min(frame.shape[1] - 1, max(x_values))
+    y1 = max(0, min(y_values))
+    y2 = min(frame.shape[0] - 1, max(y_values))
+    return x1, y1, x2, y2
+
+
+def draw_box_overlay(
+    frame: np.ndarray,
+    bbox,
+    color: tuple[int, int, int],
+    thickness: int = 1,
+) -> None:
+    """Draw only the OCR bounding box."""
+    x1, y1, x2, y2 = get_bbox_rect(frame, bbox)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(1, thickness))
+
+
 def draw_text_overlay(
     frame: np.ndarray,
     bbox,
     text: str,
     font_scale: float,
     font_color: tuple[int, int, int],
+    font_thickness: int = 2,
     bg_color: tuple[int, int, int] | None = None,
     bg_opacity: int = 70,
 ) -> None:
-    """Draw a readable OCR text overlay inside the original bounding box."""
-    points = [(int(point[0]), int(point[1])) for point in bbox]
-    x_values = [point[0] for point in points]
-    y_values = [point[1] for point in points]
-    x1, x2 = max(0, min(x_values)), min(frame.shape[1] - 1, max(x_values))
-    y1, y2 = max(0, min(y_values)), min(frame.shape[0] - 1, max(y_values))
+    """Draw OCR text, optionally with a tight semi-transparent background."""
+    x1, y1, _, y2 = get_bbox_rect(frame, bbox)
+    thickness = max(1, font_thickness)
+    baseline = 0
+    text_size, baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+    text_width, text_height = text_size
 
-    if bg_color is None:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), font_color, 2)
-        cv2.putText(
-            frame,
-            text,
-            (x1, max(15, y1 - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            font_color,
-            2,
-            cv2.LINE_AA,
-        )
-        return
+    text_x = x1 + 4
+    text_y = max(text_height + 4, y1 - 8)
+    if text_y - text_height < 0:
+        text_y = min(frame.shape[0] - 5, y2 + text_height + 8)
 
-    opacity = max(0, min(bg_opacity, 100)) / 100.0
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x1, y1), (x2, y2), bg_color, -1)
-    cv2.addWeighted(overlay, opacity, frame, 1.0 - opacity, 0, frame)
+    if bg_color is not None:
+        padding = 4
+        bg_x1 = max(0, text_x - padding)
+        bg_y1 = max(0, text_y - text_height - padding)
+        bg_x2 = min(frame.shape[1] - 1, text_x + text_width + padding)
+        bg_y2 = min(frame.shape[0] - 1, text_y + baseline + padding)
+        opacity = max(0, min(bg_opacity, 100)) / 100.0
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), bg_color, -1)
+        cv2.addWeighted(overlay, opacity, frame, 1.0 - opacity, 0, frame)
 
-    text_y = min(max(y1 + int(24 * font_scale), 15), frame.shape[0] - 5)
     cv2.putText(
         frame,
         text,
-        (x1 + 4, text_y),
+        (text_x, text_y),
         cv2.FONT_HERSHEY_SIMPLEX,
         font_scale,
         font_color,
-        2,
+        thickness,
         cv2.LINE_AA,
     )
