@@ -24,9 +24,9 @@ _FILTER_PARAM_KEYS = {
     "yolo":           ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
     "ocr":            [
         "ocr_langs", "ocr_conf", "ocr_font_color", "ocr_font_size",
-        "ocr_font_thickness", "ocr_show_text", "ocr_show_boxes", "ocr_box_thickness",
-        "ocr_text_background", "ocr_overlay_text_source", "ocr_translate_target",
-        "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity",
+        "ocr_font_thickness", "ocr_text_position", "ocr_show_text", "ocr_show_boxes",
+        "ocr_box_thickness", "ocr_text_background", "ocr_overlay_text_source",
+        "ocr_translate_target", "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity",
     ],
 }
 
@@ -445,6 +445,16 @@ class ControlWindow(QWidget):
         ocr_font_thickness_row.addWidget(QLabel("Font Thickness:"))
         ocr_font_thickness_row.addWidget(self.spin_ocr_font_thickness)
 
+        # Text position
+        ocr_text_position_row = QHBoxLayout()
+        self.combo_ocr_text_position = QComboBox()
+        self.combo_ocr_text_position.addItem("Above", userData="above")
+        self.combo_ocr_text_position.addItem("Below", userData="below")
+        self.combo_ocr_text_position.addItem("On Text", userData="inside")
+        self.combo_ocr_text_position.currentTextChanged.connect(self._on_ocr_params_changed)
+        ocr_text_position_row.addWidget(QLabel("Text Position:"))
+        ocr_text_position_row.addWidget(self.combo_ocr_text_position)
+
         # Overlay visibility toggles
         ocr_toggle_row = QHBoxLayout()
         self.chk_ocr_show_text = QCheckBox("Show Text")
@@ -509,6 +519,7 @@ class ControlWindow(QWidget):
         ocr_layout.addLayout(ocr_font_color_row)
         ocr_layout.addLayout(ocr_font_size_row)
         ocr_layout.addLayout(ocr_font_thickness_row)
+        ocr_layout.addLayout(ocr_text_position_row)
         ocr_layout.addLayout(ocr_toggle_row)
         ocr_layout.addLayout(ocr_box_thickness_row)
         ocr_layout.addLayout(ocr_overlay_source_row)
@@ -860,6 +871,7 @@ class ControlWindow(QWidget):
             "ocr_font_color": self._ocr_font_color,
             "ocr_font_size": self.spin_ocr_font_size.value(),
             "ocr_font_thickness": self.spin_ocr_font_thickness.value(),
+            "ocr_text_position": self.combo_ocr_text_position.currentData() or "above",
             "ocr_show_text": self.chk_ocr_show_text.isChecked(),
             "ocr_show_boxes": self.chk_ocr_show_boxes.isChecked(),
             "ocr_box_thickness": self.spin_ocr_box_thickness.value(),

@@ -112,6 +112,7 @@ def draw_text_overlay(
     font_scale: float,
     font_color: tuple[int, int, int],
     font_thickness: int = 2,
+    text_position: str = "above",
     bg_color: tuple[int, int, int] | None = None,
     bg_opacity: int = 70,
 ) -> None:
@@ -123,9 +124,16 @@ def draw_text_overlay(
     text_width, text_height = text_size
 
     text_x = x1 + 4
-    text_y = max(text_height + 4, y1 - 8)
-    if text_y - text_height < 0:
+    if text_position == "inside":
+        text_y = min(max(y1 + text_height + 4, text_height + 4), frame.shape[0] - 5)
+    elif text_position == "below":
         text_y = min(frame.shape[0] - 5, y2 + text_height + 8)
+        if text_y + baseline > frame.shape[0] - 1:
+            text_y = max(text_height + 4, y1 - 8)
+    else:
+        text_y = max(text_height + 4, y1 - 8)
+        if text_y - text_height < 0:
+            text_y = min(frame.shape[0] - 5, y2 + text_height + 8)
 
     if bg_color is not None:
         padding = 4

@@ -197,18 +197,19 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     bgr = _to_bgr(frame)
     langs = params.get("ocr_langs", ["en"])
     confidence_thresh = params.get("ocr_conf", 50) / 100.0
-    font_color = params.get("ocr_font_color", (255, 0, 0))
-    font_size = params.get("ocr_font_size", 16)
+    font_color = params.get("ocr_font_color", (255, 255, 255))
+    font_size = params.get("ocr_font_size", 14)
     font_scale = max(0.3, font_size / 24.0)
     font_thickness = params.get("ocr_font_thickness", 1)
+    text_position = params.get("ocr_text_position", "above")
     box_thickness = params.get("ocr_box_thickness", 1)
     show_text = params.get("ocr_show_text", True)
     show_boxes = params.get("ocr_show_boxes", True)
-    text_background = params.get("ocr_text_background", False)
+    text_background = params.get("ocr_text_background", True)
     overlay_text_source = params.get("ocr_overlay_text_source", "original")
     translate_target = params.get("ocr_translate_target", "es")
     subtitle_bg_color = params.get("ocr_subtitle_bg_color", (0, 0, 0))
-    subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 70)
+    subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 100)
     
     # Throttling logic
     current_time = time.time()
@@ -254,6 +255,7 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
                     font_scale,
                     font_color,
                     font_thickness,
+                    text_position,
                     bg_color,
                     subtitle_bg_opacity,
                 )
