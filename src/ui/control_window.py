@@ -1,14 +1,15 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox,
+    QPushButton, QSlider, QComboBox, QFileDialog, QCheckBox,
     QStackedWidget, QApplication, QListWidget, QAbstractItemView, QListWidgetItem,
-    QColorDialog, QSpinBox
+    QColorDialog, QSpinBox, QScrollArea, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 
 from core.ocr import OCR_LANGUAGES, TRANSLATION_LANGUAGES
 from core.processing import FILTER_DISPLAY_NAMES
+from ui.widgets.collapsible_section import CollapsibleSection
 
 
 # Maps internal filter name -> the params it emits
@@ -65,9 +66,9 @@ class ControlWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GlassCV - Control Panel")
-        self.setMinimumSize(460, 840)
+        self.setMinimumSize(900, 640)
         self._current_pixmap = None
-        self._ocr_font_color = (255, 0, 0)
+        self._ocr_font_color = (255, 255, 255)
         self._ocr_subtitle_bg_color = (0, 0, 0)
         self._setup_ui()
         self._apply_styles()
@@ -77,24 +78,26 @@ class ControlWindow(QWidget):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(6)
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(8)
 
         # ── Image Viewer ──────────────────────────────────────────────
         self.image_label = QLabel("Waiting for capture...")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setMinimumHeight(280)
+        self.image_label.setMinimumSize(360, 280)
         self.image_label.setStyleSheet(
             "background-color: #222; color: #aaa; border: 1px solid #444; border-radius: 4px;"
         )
-        main_layout.addWidget(self.image_label)
 
-        controls_layout = QVBoxLayout()
+        controls_panel = QWidget()
+        controls_layout = QVBoxLayout(controls_panel)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(6)
 
         # ── Capture Mode ──────────────────────────────────────────────
-        group_capture = QGroupBox("Capture Mode")
+        section_capture = CollapsibleSection("Capture", expanded=True)
         capture_layout = QHBoxLayout()
+        capture_layout.setContentsMargins(0, 0, 0, 0)
         self.btn_mode = QPushButton("Mode: Continuous")
         self.btn_mode.setCheckable(True)
         self.btn_mode.setChecked(True)
@@ -104,12 +107,13 @@ class ControlWindow(QWidget):
         self.btn_snapshot.setEnabled(False)
         self.btn_snapshot.clicked.connect(self.snapshot_requested.emit)
         capture_layout.addWidget(self.btn_snapshot)
-        group_capture.setLayout(capture_layout)
-        controls_layout.addWidget(group_capture)
+        section_capture.set_content_layout(capture_layout)
+        controls_layout.addWidget(section_capture)
 
         # ── Performance (FPS) ─────────────────────────────────────────
-        group_fps = QGroupBox("Performance (Target FPS)")
+        section_fps = CollapsibleSection("Performance", expanded=False)
         fps_layout = QHBoxLayout()
+        fps_layout.setContentsMargins(0, 0, 0, 0)
         self.slider_fps = QSlider(Qt.Orientation.Horizontal)
         self.slider_fps.setMinimum(10)
         self.slider_fps.setMaximum(60)
@@ -118,12 +122,15 @@ class ControlWindow(QWidget):
         self.lbl_fps_val = QLabel("30")
         fps_layout.addWidget(self.slider_fps)
         fps_layout.addWidget(self.lbl_fps_val)
-        group_fps.setLayout(fps_layout)
-        controls_layout.addWidget(group_fps)
+        section_fps.set_content_layout(fps_layout)
+        controls_layout.addWidget(section_fps)
 
         # ── Glass Behavior ────────────────────────────────────────────
-        group_glass = QGroupBox("Glass Behavior")
-        glass_layout = QHBoxLayout()
+        section_glass = CollapsibleSection("Glass", expanded=False)
+        glass_layout = QVBoxLayout()
+        glass_layout.setContentsMargins(0, 0, 0, 0)
+        glass_options_row = QHBoxLayout()
+        glass_status_row = QHBoxLayout()
         self.chk_pin = QCheckBox("Pin (Click-Through)")
         self.chk_pin.toggled.connect(self.glass_pinned.emit)
         self.chk_mirror = QCheckBox("Mirror on Glass")
@@ -134,16 +141,20 @@ class ControlWindow(QWidget):
         
         self.lbl_glass_size = QLabel("Size: N/A")
         
-        glass_layout.addWidget(self.chk_pin)
-        glass_layout.addWidget(self.chk_mirror)
-        glass_layout.addWidget(self.chk_border)
-        glass_layout.addWidget(self.lbl_glass_size)
-        group_glass.setLayout(glass_layout)
-        controls_layout.addWidget(group_glass)
+        glass_options_row.addWidget(self.chk_pin)
+        glass_options_row.addWidget(self.chk_mirror)
+        glass_options_row.addWidget(self.chk_border)
+        glass_status_row.addWidget(self.lbl_glass_size)
+        glass_status_row.addStretch()
+        glass_layout.addLayout(glass_options_row)
+        glass_layout.addLayout(glass_status_row)
+        section_glass.set_content_layout(glass_layout)
+        controls_layout.addWidget(section_glass)
 
         # ── Filters ───────────────────────────────────────────────────
-        group_filters = QGroupBox("Filter Chain")
+        section_filters = CollapsibleSection("Filters", expanded=True)
         filters_main_layout = QVBoxLayout()
+        filters_main_layout.setContentsMargins(0, 0, 0, 0)
         filters_main_layout.setSpacing(6)
         # Row 1: combo + Add button
         add_row = QHBoxLayout()
@@ -201,9 +212,19 @@ class ControlWindow(QWidget):
         self.stacked_params = QStackedWidget()
         self._build_param_pages()
         filters_main_layout.addWidget(self.stacked_params)
-        group_filters.setLayout(filters_main_layout)
-        controls_layout.addWidget(group_filters)
-        main_layout.addLayout(controls_layout)
+        section_filters.set_content_layout(filters_main_layout)
+        controls_layout.addWidget(section_filters)
+        controls_layout.addStretch()
+
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        controls_scroll.setWidget(controls_panel)
+        controls_scroll.setMinimumWidth(360)
+
+        main_layout.addWidget(controls_scroll, stretch=2)
+        main_layout.addWidget(self.image_label, stretch=3)
         
     # ------------------------------------------------------------------
     # Parameter pages (one per filter that has parameters)
@@ -514,18 +535,48 @@ class ControlWindow(QWidget):
         ocr_bg_opacity_row.addWidget(self.lbl_ocr_bg_opacity)
         ocr_bg_opacity_row.addWidget(self.slider_ocr_bg_opacity)
         
-        ocr_layout.addLayout(ocr_lang_row)
-        ocr_layout.addLayout(ocr_conf_row)
-        ocr_layout.addLayout(ocr_font_color_row)
-        ocr_layout.addLayout(ocr_font_size_row)
-        ocr_layout.addLayout(ocr_font_thickness_row)
-        ocr_layout.addLayout(ocr_text_position_row)
-        ocr_layout.addLayout(ocr_toggle_row)
-        ocr_layout.addLayout(ocr_box_thickness_row)
-        ocr_layout.addLayout(ocr_overlay_source_row)
-        ocr_layout.addLayout(ocr_target_row)
-        ocr_layout.addLayout(ocr_bg_color_row)
-        ocr_layout.addLayout(ocr_bg_opacity_row)
+        ocr_basic_section = CollapsibleSection("Basic", expanded=True)
+        ocr_basic_layout = QVBoxLayout()
+        ocr_basic_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_basic_layout.addLayout(ocr_lang_row)
+        ocr_basic_layout.addLayout(ocr_conf_row)
+        ocr_basic_layout.addLayout(ocr_toggle_row)
+        ocr_basic_section.set_content_layout(ocr_basic_layout)
+
+        ocr_overlay_section = CollapsibleSection("Overlay", expanded=False)
+        ocr_overlay_layout = QVBoxLayout()
+        ocr_overlay_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_overlay_layout.addLayout(ocr_font_color_row)
+        ocr_overlay_layout.addLayout(ocr_font_size_row)
+        ocr_overlay_layout.addLayout(ocr_font_thickness_row)
+        ocr_overlay_layout.addLayout(ocr_text_position_row)
+        ocr_overlay_layout.addLayout(ocr_overlay_source_row)
+        ocr_overlay_section.set_content_layout(ocr_overlay_layout)
+
+        ocr_translation_section = CollapsibleSection("Translation", expanded=False)
+        ocr_translation_layout = QVBoxLayout()
+        ocr_translation_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_translation_layout.addLayout(ocr_target_row)
+        ocr_translation_section.set_content_layout(ocr_translation_layout)
+
+        ocr_boxes_section = CollapsibleSection("Boxes", expanded=False)
+        ocr_boxes_layout = QVBoxLayout()
+        ocr_boxes_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_boxes_layout.addLayout(ocr_box_thickness_row)
+        ocr_boxes_section.set_content_layout(ocr_boxes_layout)
+
+        ocr_background_section = CollapsibleSection("Background", expanded=False)
+        ocr_background_layout = QVBoxLayout()
+        ocr_background_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_background_layout.addLayout(ocr_bg_color_row)
+        ocr_background_layout.addLayout(ocr_bg_opacity_row)
+        ocr_background_section.set_content_layout(ocr_background_layout)
+
+        ocr_layout.addWidget(ocr_basic_section)
+        ocr_layout.addWidget(ocr_overlay_section)
+        ocr_layout.addWidget(ocr_translation_section)
+        ocr_layout.addWidget(ocr_boxes_section)
+        ocr_layout.addWidget(ocr_background_section)
         self.stacked_params.addWidget(self.ocr_page)
         self._on_ocr_text_background_toggled(False)
 
@@ -565,6 +616,28 @@ class ControlWindow(QWidget):
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 3px;
+            }
+            QScrollArea {
+                border: none;
+            }
+            QPushButton#collapsibleHeader {
+                background-color: #343434;
+                border: 1px solid #4a4a4a;
+                border-radius: 3px;
+                padding: 6px 8px;
+                text-align: left;
+                font-weight: bold;
+                min-width: 0;
+            }
+            QPushButton#collapsibleHeader:hover {
+                background-color: #3f3f3f;
+            }
+            QFrame#collapsibleContent {
+                border-left: 1px solid #444;
+                border-right: 1px solid #444;
+                border-bottom: 1px solid #444;
+                border-bottom-left-radius: 3px;
+                border-bottom-right-radius: 3px;
             }
             QPushButton {
                 background-color: #3d3d3d;
