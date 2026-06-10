@@ -21,6 +21,9 @@ GlassCV is a high-performance desktop application focused on real-time screen ca
 - **EasyOCR Text Recognition**: Real-time text detection and recognition using EasyOCR with GPU acceleration. Features include:
   - Built-in throttling mechanism (max 2 FPS) to maintain a smooth video feed while performing OCR.
   - Adjustable confidence threshold and language selection.
+  - Configurable OCR overlay with toggles for text, boxes, confidence scores, and text background.
+  - Independent styling for text, detection boxes, and text background, including color, thickness, opacity, and padding controls.
+  - Translation workflow with target language selection, overlay text source selection, and a Translate action.
 - **GPU Acceleration**: Full NVIDIA CUDA support via PyTorch. AI models (YOLO and EasyOCR) automatically detect and utilize your GPU for maximum performance.
 
 ## Technologies Used
@@ -77,6 +80,9 @@ Upon launching, the following main windows will open:
 
 *Note: A third **Template Glass** window can be toggled from the Control Panel to capture specific visual templates for the Object Counter filter.*
 
+## App Preview
+
+
 ### Using YOLO Object Detection
 
 1. In the Filter Chain section, select **YOLO Object Detection** from the dropdown and click **＋ Add**.
@@ -85,17 +91,33 @@ Upon launching, the following main windows will open:
 4. Toggle **Show Labels** and **Show Confidences** to control what information is displayed on detections.
 5. To use a custom-trained model, click **Custom...** and select your `.pt` file.
 
+### Control Panel with YOLO Object Detection
+
+![GlassCV Control Panel](img/ui_v2.png)
+
 ### Using EasyOCR Text Recognition
 
 1. In the Filter Chain section, select **EasyOCR Text Recognition** from the dropdown and click **＋ Add**.
 2. Select the target **Language** from the dropdown.
 3. Adjust the **Confidence** slider to filter out low-confidence text detections.
+4. Use the **Overlay** section to show or hide text, boxes, confidence scores, and text backgrounds.
+5. Customize text, detection boxes, and background styling from their respective subsections.
+6. Use the **Translation** section to select the target language, choose whether the overlay uses original or translated text, and run **Translate**.
+
+### Glass Overlay with OCR and translation
+
+![GlassCV Glass Overlay](img/ocr_translated.png)
+
+### OCR with Translation Panel
+
+![GlassCV OCR/Translation Overlay](img/ocr_and_translation_overlay.png)
 
 ## Project Structure
 
 - `src/`
   - `main.py`: Main entry point of the application.
   - `ui/`: Modules containing the GUI logic (ControlWindow and GlassWindow).
+    - `widgets/`: Reusable UI widgets, such as collapsible configuration sections.
   - `core/`: Core logic, screen capture via `mss`, background thread image processing, AI model integration, geometry calculations, etc.
 - `models/`: Directory where YOLO model weights (`.pt` files) are stored. Models are automatically downloaded here when selected for the first time.
 - `pyproject.toml`: Project configuration and dependencies.

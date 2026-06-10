@@ -1,14 +1,15 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QComboBox, QGroupBox, QFileDialog, QCheckBox,
+    QPushButton, QSlider, QComboBox, QFileDialog, QCheckBox,
     QStackedWidget, QApplication, QListWidget, QAbstractItemView, QListWidgetItem,
-    QColorDialog, QSpinBox
+    QColorDialog, QSpinBox, QScrollArea, QFrame, QGridLayout
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 
 from core.ocr import OCR_LANGUAGES, TRANSLATION_LANGUAGES
 from core.processing import FILTER_DISPLAY_NAMES
+from ui.widgets.collapsible_section import CollapsibleSection
 
 
 # Maps internal filter name -> the params it emits
@@ -25,8 +26,9 @@ _FILTER_PARAM_KEYS = {
     "ocr":            [
         "ocr_langs", "ocr_conf", "ocr_font_color", "ocr_font_size",
         "ocr_font_thickness", "ocr_text_position", "ocr_show_text", "ocr_show_boxes",
-        "ocr_box_thickness", "ocr_text_background", "ocr_overlay_text_source",
-        "ocr_translate_target", "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity",
+        "ocr_show_conf", "ocr_box_thickness", "ocr_box_color", "ocr_box_opacity",
+        "ocr_text_background", "ocr_overlay_text_source", "ocr_translate_target",
+        "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity", "ocr_background_padding",
     ],
 }
 
@@ -49,6 +51,7 @@ class ControlWindow(QWidget):
     border_toggled = pyqtSignal(bool)
     toggle_template_glass = pyqtSignal(bool)
     request_template_capture = pyqtSignal()
+    translate_requested = pyqtSignal()
 
     ALL_FILTERS = [
         "normal", "grayscale", "canny", "mirror", "symmetry",
@@ -65,9 +68,10 @@ class ControlWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GlassCV - Control Panel")
-        self.setMinimumSize(460, 840)
+        self.setMinimumSize(900, 640)
         self._current_pixmap = None
-        self._ocr_font_color = (255, 0, 0)
+        self._ocr_font_color = (255, 255, 255)
+        self._ocr_box_color = (255, 255, 255)
         self._ocr_subtitle_bg_color = (0, 0, 0)
         self._setup_ui()
         self._apply_styles()
@@ -77,24 +81,26 @@ class ControlWindow(QWidget):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(6)
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(8)
 
         # ── Image Viewer ──────────────────────────────────────────────
         self.image_label = QLabel("Waiting for capture...")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setMinimumHeight(280)
+        self.image_label.setMinimumSize(360, 280)
         self.image_label.setStyleSheet(
             "background-color: #222; color: #aaa; border: 1px solid #444; border-radius: 4px;"
         )
-        main_layout.addWidget(self.image_label)
 
-        controls_layout = QVBoxLayout()
+        controls_panel = QWidget()
+        controls_layout = QVBoxLayout(controls_panel)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(6)
 
         # ── Capture Mode ──────────────────────────────────────────────
-        group_capture = QGroupBox("Capture Mode")
+        section_capture = CollapsibleSection("Capture", expanded=True)
         capture_layout = QHBoxLayout()
+        capture_layout.setContentsMargins(0, 0, 0, 0)
         self.btn_mode = QPushButton("Mode: Continuous")
         self.btn_mode.setCheckable(True)
         self.btn_mode.setChecked(True)
@@ -104,12 +110,13 @@ class ControlWindow(QWidget):
         self.btn_snapshot.setEnabled(False)
         self.btn_snapshot.clicked.connect(self.snapshot_requested.emit)
         capture_layout.addWidget(self.btn_snapshot)
-        group_capture.setLayout(capture_layout)
-        controls_layout.addWidget(group_capture)
+        section_capture.set_content_layout(capture_layout)
+        controls_layout.addWidget(section_capture)
 
         # ── Performance (FPS) ─────────────────────────────────────────
-        group_fps = QGroupBox("Performance (Target FPS)")
+        section_fps = CollapsibleSection("Performance", expanded=False)
         fps_layout = QHBoxLayout()
+        fps_layout.setContentsMargins(0, 0, 0, 0)
         self.slider_fps = QSlider(Qt.Orientation.Horizontal)
         self.slider_fps.setMinimum(10)
         self.slider_fps.setMaximum(60)
@@ -118,12 +125,15 @@ class ControlWindow(QWidget):
         self.lbl_fps_val = QLabel("30")
         fps_layout.addWidget(self.slider_fps)
         fps_layout.addWidget(self.lbl_fps_val)
-        group_fps.setLayout(fps_layout)
-        controls_layout.addWidget(group_fps)
+        section_fps.set_content_layout(fps_layout)
+        controls_layout.addWidget(section_fps)
 
         # ── Glass Behavior ────────────────────────────────────────────
-        group_glass = QGroupBox("Glass Behavior")
-        glass_layout = QHBoxLayout()
+        section_glass = CollapsibleSection("Glass", expanded=False)
+        glass_layout = QVBoxLayout()
+        glass_layout.setContentsMargins(0, 0, 0, 0)
+        glass_options_row = QHBoxLayout()
+        glass_status_row = QHBoxLayout()
         self.chk_pin = QCheckBox("Pin (Click-Through)")
         self.chk_pin.toggled.connect(self.glass_pinned.emit)
         self.chk_mirror = QCheckBox("Mirror on Glass")
@@ -134,16 +144,20 @@ class ControlWindow(QWidget):
         
         self.lbl_glass_size = QLabel("Size: N/A")
         
-        glass_layout.addWidget(self.chk_pin)
-        glass_layout.addWidget(self.chk_mirror)
-        glass_layout.addWidget(self.chk_border)
-        glass_layout.addWidget(self.lbl_glass_size)
-        group_glass.setLayout(glass_layout)
-        controls_layout.addWidget(group_glass)
+        glass_options_row.addWidget(self.chk_pin)
+        glass_options_row.addWidget(self.chk_mirror)
+        glass_options_row.addWidget(self.chk_border)
+        glass_status_row.addWidget(self.lbl_glass_size)
+        glass_status_row.addStretch()
+        glass_layout.addLayout(glass_options_row)
+        glass_layout.addLayout(glass_status_row)
+        section_glass.set_content_layout(glass_layout)
+        controls_layout.addWidget(section_glass)
 
         # ── Filters ───────────────────────────────────────────────────
-        group_filters = QGroupBox("Filter Chain")
+        section_filters = CollapsibleSection("Filters", expanded=True)
         filters_main_layout = QVBoxLayout()
+        filters_main_layout.setContentsMargins(0, 0, 0, 0)
         filters_main_layout.setSpacing(6)
         # Row 1: combo + Add button
         add_row = QHBoxLayout()
@@ -201,9 +215,19 @@ class ControlWindow(QWidget):
         self.stacked_params = QStackedWidget()
         self._build_param_pages()
         filters_main_layout.addWidget(self.stacked_params)
-        group_filters.setLayout(filters_main_layout)
-        controls_layout.addWidget(group_filters)
-        main_layout.addLayout(controls_layout)
+        section_filters.set_content_layout(filters_main_layout)
+        controls_layout.addWidget(section_filters)
+        controls_layout.addStretch()
+
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        controls_scroll.setWidget(controls_panel)
+        controls_scroll.setMinimumWidth(360)
+
+        main_layout.addWidget(controls_scroll, stretch=2)
+        main_layout.addWidget(self.image_label, stretch=3)
         
     # ------------------------------------------------------------------
     # Parameter pages (one per filter that has parameters)
@@ -456,20 +480,25 @@ class ControlWindow(QWidget):
         ocr_text_position_row.addWidget(self.combo_ocr_text_position)
 
         # Overlay visibility toggles
-        ocr_toggle_row = QHBoxLayout()
+        ocr_toggle_row = QGridLayout()
+        ocr_toggle_row.setContentsMargins(0, 0, 0, 0)
         self.chk_ocr_show_text = QCheckBox("Show Text")
         self.chk_ocr_show_text.setChecked(True)
         self.chk_ocr_show_text.toggled.connect(self._on_ocr_params_changed)
         self.chk_ocr_show_boxes = QCheckBox("Show Boxes")
         self.chk_ocr_show_boxes.setChecked(True)
         self.chk_ocr_show_boxes.toggled.connect(self._on_ocr_params_changed)
+        self.chk_ocr_show_conf = QCheckBox("Show Confidence")
+        self.chk_ocr_show_conf.setChecked(True)
+        self.chk_ocr_show_conf.toggled.connect(self._on_ocr_params_changed)
         self.chk_ocr_text_background = QCheckBox("Text Background")
         self.chk_ocr_text_background.toggled.connect(self._on_ocr_text_background_toggled)
-        ocr_toggle_row.addWidget(self.chk_ocr_show_text)
-        ocr_toggle_row.addWidget(self.chk_ocr_show_boxes)
-        ocr_toggle_row.addWidget(self.chk_ocr_text_background)
+        ocr_toggle_row.addWidget(self.chk_ocr_show_text, 0, 0)
+        ocr_toggle_row.addWidget(self.chk_ocr_show_boxes, 0, 1)
+        ocr_toggle_row.addWidget(self.chk_ocr_show_conf, 1, 0)
+        ocr_toggle_row.addWidget(self.chk_ocr_text_background, 1, 1)
 
-        # Box thickness
+        # Box style
         ocr_box_thickness_row = QHBoxLayout()
         self.spin_ocr_box_thickness = QSpinBox()
         self.spin_ocr_box_thickness.setRange(1, 5)
@@ -477,6 +506,22 @@ class ControlWindow(QWidget):
         self.spin_ocr_box_thickness.valueChanged.connect(self._on_ocr_params_changed)
         ocr_box_thickness_row.addWidget(QLabel("Box Thickness:"))
         ocr_box_thickness_row.addWidget(self.spin_ocr_box_thickness)
+
+        ocr_box_color_row = QHBoxLayout()
+        self.btn_ocr_box_color = QPushButton("Box Color")
+        self.btn_ocr_box_color.clicked.connect(self._on_ocr_box_color_clicked)
+        self._update_color_button(self.btn_ocr_box_color, self._ocr_box_color)
+        ocr_box_color_row.addWidget(QLabel("Box Color:"))
+        ocr_box_color_row.addWidget(self.btn_ocr_box_color)
+
+        ocr_box_opacity_row = QHBoxLayout()
+        self.lbl_ocr_box_opacity = QLabel("Box Opacity (0-100%): 100")
+        self.slider_ocr_box_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ocr_box_opacity.setRange(0, 100)
+        self.slider_ocr_box_opacity.setValue(100)
+        self.slider_ocr_box_opacity.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_box_opacity_row.addWidget(self.lbl_ocr_box_opacity)
+        ocr_box_opacity_row.addWidget(self.slider_ocr_box_opacity)
 
         # Overlay text source
         ocr_overlay_source_row = QHBoxLayout()
@@ -513,19 +558,76 @@ class ControlWindow(QWidget):
         self.slider_ocr_bg_opacity.valueChanged.connect(self._on_ocr_params_changed)
         ocr_bg_opacity_row.addWidget(self.lbl_ocr_bg_opacity)
         ocr_bg_opacity_row.addWidget(self.slider_ocr_bg_opacity)
+
+        ocr_bg_padding_row = QHBoxLayout()
+        self.lbl_ocr_bg_padding = QLabel("Padding (0-20): 4")
+        self.slider_ocr_bg_padding = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ocr_bg_padding.setRange(0, 20)
+        self.slider_ocr_bg_padding.setValue(4)
+        self.slider_ocr_bg_padding.valueChanged.connect(self._on_ocr_params_changed)
+        ocr_bg_padding_row.addWidget(self.lbl_ocr_bg_padding)
+        ocr_bg_padding_row.addWidget(self.slider_ocr_bg_padding)
+
+        # Translation action
+        ocr_translate_action_row = QHBoxLayout()
+        self.btn_ocr_translate = QPushButton("Translate")
+        self.btn_ocr_translate.clicked.connect(self.translate_requested.emit)
+        ocr_translate_action_row.addStretch()
+        ocr_translate_action_row.addWidget(self.btn_ocr_translate)
         
-        ocr_layout.addLayout(ocr_lang_row)
-        ocr_layout.addLayout(ocr_conf_row)
-        ocr_layout.addLayout(ocr_font_color_row)
-        ocr_layout.addLayout(ocr_font_size_row)
-        ocr_layout.addLayout(ocr_font_thickness_row)
-        ocr_layout.addLayout(ocr_text_position_row)
-        ocr_layout.addLayout(ocr_toggle_row)
-        ocr_layout.addLayout(ocr_box_thickness_row)
-        ocr_layout.addLayout(ocr_overlay_source_row)
-        ocr_layout.addLayout(ocr_target_row)
-        ocr_layout.addLayout(ocr_bg_color_row)
-        ocr_layout.addLayout(ocr_bg_opacity_row)
+        ocr_basic_section = CollapsibleSection("Basic", expanded=True)
+        ocr_basic_layout = QVBoxLayout()
+        ocr_basic_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_basic_layout.addLayout(ocr_lang_row)
+        ocr_basic_layout.addLayout(ocr_conf_row)
+        ocr_basic_section.set_content_layout(ocr_basic_layout)
+
+        ocr_overlay_section = CollapsibleSection("Overlay", expanded=False)
+        ocr_overlay_layout = QVBoxLayout()
+        ocr_overlay_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_overlay_layout.addLayout(ocr_toggle_row)
+
+        ocr_text_section = CollapsibleSection("Text", expanded=True)
+        ocr_text_layout = QVBoxLayout()
+        ocr_text_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_text_layout.addLayout(ocr_font_color_row)
+        ocr_text_layout.addLayout(ocr_font_size_row)
+        ocr_text_layout.addLayout(ocr_font_thickness_row)
+        ocr_text_layout.addLayout(ocr_text_position_row)
+        ocr_text_section.set_content_layout(ocr_text_layout)
+
+        ocr_boxes_section = CollapsibleSection("Boxes", expanded=False)
+        ocr_boxes_layout = QVBoxLayout()
+        ocr_boxes_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_boxes_layout.addLayout(ocr_box_thickness_row)
+        ocr_boxes_layout.addLayout(ocr_box_color_row)
+        ocr_boxes_layout.addLayout(ocr_box_opacity_row)
+        ocr_boxes_section.set_content_layout(ocr_boxes_layout)
+
+        ocr_background_section = CollapsibleSection("Background", expanded=False)
+        ocr_background_layout = QVBoxLayout()
+        ocr_background_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_background_layout.addLayout(ocr_bg_padding_row)
+        ocr_background_layout.addLayout(ocr_bg_color_row)
+        ocr_background_layout.addLayout(ocr_bg_opacity_row)
+        ocr_background_section.set_content_layout(ocr_background_layout)
+
+        ocr_overlay_layout.addWidget(ocr_text_section)
+        ocr_overlay_layout.addWidget(ocr_boxes_section)
+        ocr_overlay_layout.addWidget(ocr_background_section)
+        ocr_overlay_section.set_content_layout(ocr_overlay_layout)
+
+        ocr_translation_section = CollapsibleSection("Translation", expanded=False)
+        ocr_translation_layout = QVBoxLayout()
+        ocr_translation_layout.setContentsMargins(0, 0, 0, 0)
+        ocr_translation_layout.addLayout(ocr_target_row)
+        ocr_translation_layout.addLayout(ocr_overlay_source_row)
+        ocr_translation_layout.addLayout(ocr_translate_action_row)
+        ocr_translation_section.set_content_layout(ocr_translation_layout)
+
+        ocr_layout.addWidget(ocr_basic_section)
+        ocr_layout.addWidget(ocr_overlay_section)
+        ocr_layout.addWidget(ocr_translation_section)
         self.stacked_params.addWidget(self.ocr_page)
         self._on_ocr_text_background_toggled(False)
 
@@ -565,6 +667,28 @@ class ControlWindow(QWidget):
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 3px;
+            }
+            QScrollArea {
+                border: none;
+            }
+            QPushButton#collapsibleHeader {
+                background-color: #343434;
+                border: 1px solid #4a4a4a;
+                border-radius: 3px;
+                padding: 6px 8px;
+                text-align: left;
+                font-weight: bold;
+                min-width: 0;
+            }
+            QPushButton#collapsibleHeader:hover {
+                background-color: #3f3f3f;
+            }
+            QFrame#collapsibleContent {
+                border-left: 1px solid #444;
+                border-right: 1px solid #444;
+                border-bottom: 1px solid #444;
+                border-bottom-left-radius: 3px;
+                border-bottom-right-radius: 3px;
             }
             QPushButton {
                 background-color: #3d3d3d;
@@ -639,12 +763,58 @@ class ControlWindow(QWidget):
         for i in range(self.list_chain.count()):
             item = self.list_chain.item(i)
             name = item.data(Qt.ItemDataRole.UserRole)
-            chain.append({"name": name, "params": {}})
+            chain.append({"name": name, "params": self._get_filter_params(name)})
         return chain
+
+    def _get_filter_params(self, filter_name: str) -> dict:
+        """Read the current UI values for a filter without emitting signals."""
+        if filter_name == "canny":
+            return {
+                "canny_t1": self.slider_canny_t1.value(),
+                "canny_t2": self.slider_canny_t2.value(),
+            }
+        if filter_name == "rgb_mixer":
+            return {
+                "r_mult": self.slider_r.value(),
+                "g_mult": self.slider_g.value(),
+                "b_mult": self.slider_b.value(),
+            }
+        if filter_name == "binary":
+            return {"binary_threshold": self.slider_bin.value()}
+        if filter_name == "pixelated":
+            return {"pixel_size": self.slider_pix.value()}
+        if filter_name == "colorblind":
+            return {"cb_type": self.combo_cb.currentText()}
+        if filter_name == "object_counter":
+            return {"confidence": self.slider_conf.value()}
+        if filter_name == "smart_inverter":
+            return {"intensity": self.slider_inv.value()}
+        if filter_name == "symmetry":
+            return {"symmetry_axis": self.combo_sym.currentText()}
+        if filter_name == "yolo":
+            path = self.combo_yolo_model.currentData()
+            if not path:
+                import os
+                path = os.path.join("models", "yolo11n.pt")
+            return {
+                "yolo_model": path,
+                "yolo_conf": self.slider_yolo_conf.value(),
+                "yolo_iou": self.slider_yolo_iou.value(),
+                "yolo_labels": self.chk_yolo_labels.isChecked(),
+                "yolo_show_conf": self.chk_yolo_show_conf.isChecked(),
+            }
+        if filter_name == "ocr":
+            return self._get_ocr_params()
+        return {}
 
     def _emit_chain(self):
         """Emit the current chain to the processor."""
         self.filter_chain_changed.emit(self._get_chain())
+
+    def _emit_current_filter_params(self, filter_name: str):
+        params = self._get_filter_params(filter_name)
+        if params:
+            self.filter_params_changed_for.emit(filter_name, params)
 
     def _add_item_to_list(self, filter_name: str):
         """Add a filter to the QListWidget."""
@@ -665,6 +835,7 @@ class ControlWindow(QWidget):
             # Select the new item
             self.list_chain.setCurrentRow(self.list_chain.count() - 1)
             self._emit_chain()
+            self._emit_current_filter_params(filter_name)
         elif filter_name == "normal":
             # Normal = clear chain
             self.list_chain.clear()
@@ -848,6 +1019,13 @@ class ControlWindow(QWidget):
             self._update_color_button(self.btn_ocr_font_color, self._ocr_font_color)
             self._on_ocr_params_changed()
 
+    def _on_ocr_box_color_clicked(self):
+        color = QColorDialog.getColor(self._bgr_to_qcolor(self._ocr_box_color), self, "Select OCR Box Color")
+        if color.isValid():
+            self._ocr_box_color = self._qcolor_to_bgr(color)
+            self._update_color_button(self.btn_ocr_box_color, self._ocr_box_color)
+            self._on_ocr_params_changed()
+
     def _on_ocr_bg_color_clicked(self):
         color = QColorDialog.getColor(self._bgr_to_qcolor(self._ocr_subtitle_bg_color), self, "Select Subtitle Background")
         if color.isValid():
@@ -858,29 +1036,41 @@ class ControlWindow(QWidget):
     def _on_ocr_text_background_toggled(self, checked: bool):
         self.btn_ocr_bg_color.setEnabled(checked)
         self.slider_ocr_bg_opacity.setEnabled(checked)
+        self.slider_ocr_bg_padding.setEnabled(checked)
         self._on_ocr_params_changed()
 
-    def _on_ocr_params_changed(self):
-        conf = self.slider_ocr_conf.value()
-        bg_opacity = self.slider_ocr_bg_opacity.value()
-        self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
-        self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
-        self._emit_filter_params({
+    def _get_ocr_params(self) -> dict:
+        return {
             "ocr_langs": [self.combo_ocr_lang.currentData() or "en"],
-            "ocr_conf": conf,
+            "ocr_conf": self.slider_ocr_conf.value(),
             "ocr_font_color": self._ocr_font_color,
             "ocr_font_size": self.spin_ocr_font_size.value(),
             "ocr_font_thickness": self.spin_ocr_font_thickness.value(),
             "ocr_text_position": self.combo_ocr_text_position.currentData() or "above",
             "ocr_show_text": self.chk_ocr_show_text.isChecked(),
             "ocr_show_boxes": self.chk_ocr_show_boxes.isChecked(),
+            "ocr_show_conf": self.chk_ocr_show_conf.isChecked(),
             "ocr_box_thickness": self.spin_ocr_box_thickness.value(),
+            "ocr_box_color": self._ocr_box_color,
+            "ocr_box_opacity": self.slider_ocr_box_opacity.value(),
             "ocr_text_background": self.chk_ocr_text_background.isChecked(),
             "ocr_overlay_text_source": self.combo_ocr_overlay_source.currentData() or "original",
             "ocr_translate_target": self.combo_ocr_translate_target.currentData() or "es",
             "ocr_subtitle_bg_color": self._ocr_subtitle_bg_color,
-            "ocr_subtitle_bg_opacity": bg_opacity,
-        })
+            "ocr_subtitle_bg_opacity": self.slider_ocr_bg_opacity.value(),
+            "ocr_background_padding": self.slider_ocr_bg_padding.value(),
+        }
+
+    def _on_ocr_params_changed(self):
+        conf = self.slider_ocr_conf.value()
+        box_opacity = self.slider_ocr_box_opacity.value()
+        bg_opacity = self.slider_ocr_bg_opacity.value()
+        bg_padding = self.slider_ocr_bg_padding.value()
+        self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
+        self.lbl_ocr_box_opacity.setText(f"Box Opacity (0-100%): {box_opacity}")
+        self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
+        self.lbl_ocr_bg_padding.setText(f"Padding (0-20): {bg_padding}")
+        self._emit_filter_params(self._get_ocr_params())
 
     # ------------------------------------------------------------------
     # Other slot handlers

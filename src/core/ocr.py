@@ -99,10 +99,18 @@ def draw_box_overlay(
     bbox,
     color: tuple[int, int, int],
     thickness: int = 1,
+    opacity: int = 100,
 ) -> None:
     """Draw only the OCR bounding box."""
     x1, y1, x2, y2 = get_bbox_rect(frame, bbox)
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(1, thickness))
+    alpha = max(0, min(opacity, 100)) / 100.0
+    if alpha >= 1.0:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(1, thickness))
+        return
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, max(1, thickness))
+    cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame)
 
 
 def draw_text_overlay(
@@ -115,6 +123,7 @@ def draw_text_overlay(
     text_position: str = "above",
     bg_color: tuple[int, int, int] | None = None,
     bg_opacity: int = 70,
+    bg_padding: int = 4,
 ) -> None:
     """Draw OCR text, optionally with a tight semi-transparent background."""
     x1, y1, _, y2 = get_bbox_rect(frame, bbox)
@@ -136,7 +145,7 @@ def draw_text_overlay(
             text_y = min(frame.shape[0] - 5, y2 + text_height + 8)
 
     if bg_color is not None:
-        padding = 4
+        padding = max(0, bg_padding)
         bg_x1 = max(0, text_x - padding)
         bg_y1 = max(0, text_y - text_height - padding)
         bg_x2 = min(frame.shape[1] - 1, text_x + text_width + padding)
