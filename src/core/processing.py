@@ -333,7 +333,17 @@ class ImageProcessor:
 
         chain is a list of {"name": str, "params": dict} entries.
         """
-        self.filter_chain = chain
+        self.filter_chain = []
+        for entry in chain:
+            name = entry.get("name")
+            if not name:
+                continue
+
+            params = entry.get("params", {})
+            if params:
+                self.all_params.setdefault(name, {}).update(params)
+            self.filter_chain.append({"name": name, "params": {}})
+
         if not any(entry.get("name") == "ocr" for entry in chain):
             ocr_params = self.all_params.get("ocr")
             if ocr_params is not None:
@@ -384,7 +394,6 @@ class ImageProcessor:
             name = entry["name"]
             # Keep the same params dict alive so filters can cache heavy state.
             merged_params = self.all_params.setdefault(name, {})
-            merged_params.update(entry.get("params", {}))
             # Propagate template_img from legacy store (object_counter needs it)
             if "template_img" in self.filter_params:
                 merged_params.setdefault("template_img", self.filter_params["template_img"])

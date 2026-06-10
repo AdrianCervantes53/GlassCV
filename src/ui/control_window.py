@@ -763,12 +763,58 @@ class ControlWindow(QWidget):
         for i in range(self.list_chain.count()):
             item = self.list_chain.item(i)
             name = item.data(Qt.ItemDataRole.UserRole)
-            chain.append({"name": name, "params": {}})
+            chain.append({"name": name, "params": self._get_filter_params(name)})
         return chain
+
+    def _get_filter_params(self, filter_name: str) -> dict:
+        """Read the current UI values for a filter without emitting signals."""
+        if filter_name == "canny":
+            return {
+                "canny_t1": self.slider_canny_t1.value(),
+                "canny_t2": self.slider_canny_t2.value(),
+            }
+        if filter_name == "rgb_mixer":
+            return {
+                "r_mult": self.slider_r.value(),
+                "g_mult": self.slider_g.value(),
+                "b_mult": self.slider_b.value(),
+            }
+        if filter_name == "binary":
+            return {"binary_threshold": self.slider_bin.value()}
+        if filter_name == "pixelated":
+            return {"pixel_size": self.slider_pix.value()}
+        if filter_name == "colorblind":
+            return {"cb_type": self.combo_cb.currentText()}
+        if filter_name == "object_counter":
+            return {"confidence": self.slider_conf.value()}
+        if filter_name == "smart_inverter":
+            return {"intensity": self.slider_inv.value()}
+        if filter_name == "symmetry":
+            return {"symmetry_axis": self.combo_sym.currentText()}
+        if filter_name == "yolo":
+            path = self.combo_yolo_model.currentData()
+            if not path:
+                import os
+                path = os.path.join("models", "yolo11n.pt")
+            return {
+                "yolo_model": path,
+                "yolo_conf": self.slider_yolo_conf.value(),
+                "yolo_iou": self.slider_yolo_iou.value(),
+                "yolo_labels": self.chk_yolo_labels.isChecked(),
+                "yolo_show_conf": self.chk_yolo_show_conf.isChecked(),
+            }
+        if filter_name == "ocr":
+            return self._get_ocr_params()
+        return {}
 
     def _emit_chain(self):
         """Emit the current chain to the processor."""
         self.filter_chain_changed.emit(self._get_chain())
+
+    def _emit_current_filter_params(self, filter_name: str):
+        params = self._get_filter_params(filter_name)
+        if params:
+            self.filter_params_changed_for.emit(filter_name, params)
 
     def _add_item_to_list(self, filter_name: str):
         """Add a filter to the QListWidget."""
@@ -789,6 +835,7 @@ class ControlWindow(QWidget):
             # Select the new item
             self.list_chain.setCurrentRow(self.list_chain.count() - 1)
             self._emit_chain()
+            self._emit_current_filter_params(filter_name)
         elif filter_name == "normal":
             # Normal = clear chain
             self.list_chain.clear()
@@ -992,18 +1039,10 @@ class ControlWindow(QWidget):
         self.slider_ocr_bg_padding.setEnabled(checked)
         self._on_ocr_params_changed()
 
-    def _on_ocr_params_changed(self):
-        conf = self.slider_ocr_conf.value()
-        box_opacity = self.slider_ocr_box_opacity.value()
-        bg_opacity = self.slider_ocr_bg_opacity.value()
-        bg_padding = self.slider_ocr_bg_padding.value()
-        self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
-        self.lbl_ocr_box_opacity.setText(f"Box Opacity (0-100%): {box_opacity}")
-        self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
-        self.lbl_ocr_bg_padding.setText(f"Padding (0-20): {bg_padding}")
-        self._emit_filter_params({
+    def _get_ocr_params(self) -> dict:
+        return {
             "ocr_langs": [self.combo_ocr_lang.currentData() or "en"],
-            "ocr_conf": conf,
+            "ocr_conf": self.slider_ocr_conf.value(),
             "ocr_font_color": self._ocr_font_color,
             "ocr_font_size": self.spin_ocr_font_size.value(),
             "ocr_font_thickness": self.spin_ocr_font_thickness.value(),
@@ -1013,14 +1052,25 @@ class ControlWindow(QWidget):
             "ocr_show_conf": self.chk_ocr_show_conf.isChecked(),
             "ocr_box_thickness": self.spin_ocr_box_thickness.value(),
             "ocr_box_color": self._ocr_box_color,
-            "ocr_box_opacity": box_opacity,
+            "ocr_box_opacity": self.slider_ocr_box_opacity.value(),
             "ocr_text_background": self.chk_ocr_text_background.isChecked(),
             "ocr_overlay_text_source": self.combo_ocr_overlay_source.currentData() or "original",
             "ocr_translate_target": self.combo_ocr_translate_target.currentData() or "es",
             "ocr_subtitle_bg_color": self._ocr_subtitle_bg_color,
-            "ocr_subtitle_bg_opacity": bg_opacity,
-            "ocr_background_padding": bg_padding,
-        })
+            "ocr_subtitle_bg_opacity": self.slider_ocr_bg_opacity.value(),
+            "ocr_background_padding": self.slider_ocr_bg_padding.value(),
+        }
+
+    def _on_ocr_params_changed(self):
+        conf = self.slider_ocr_conf.value()
+        box_opacity = self.slider_ocr_box_opacity.value()
+        bg_opacity = self.slider_ocr_bg_opacity.value()
+        bg_padding = self.slider_ocr_bg_padding.value()
+        self.lbl_ocr_conf.setText(f"Conf (1-100%): {conf}")
+        self.lbl_ocr_box_opacity.setText(f"Box Opacity (0-100%): {box_opacity}")
+        self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
+        self.lbl_ocr_bg_padding.setText(f"Padding (0-20): {bg_padding}")
+        self._emit_filter_params(self._get_ocr_params())
 
     # ------------------------------------------------------------------
     # Other slot handlers
