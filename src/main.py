@@ -66,6 +66,7 @@ class GlassCV:
         # The thread emits a numpy array (processed frame)
         self.capture_thread.frame_ready.connect(self._on_frame_ready)
         self.capture_thread.ocr_text_ready.connect(self._on_ocr_text_ready)
+        self.control.translate_requested.connect(self._on_translate_requested)
         self.ocr_text_window.translate_requested.connect(self._on_translate_requested)
         
         # --- Control Window -> Capture Thread ---

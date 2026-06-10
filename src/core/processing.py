@@ -203,13 +203,17 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     font_thickness = params.get("ocr_font_thickness", 1)
     text_position = params.get("ocr_text_position", "above")
     box_thickness = params.get("ocr_box_thickness", 1)
+    box_color = params.get("ocr_box_color", font_color)
+    box_opacity = params.get("ocr_box_opacity", 100)
     show_text = params.get("ocr_show_text", True)
     show_boxes = params.get("ocr_show_boxes", True)
+    show_conf = params.get("ocr_show_conf", True)
     text_background = params.get("ocr_text_background", True)
     overlay_text_source = params.get("ocr_overlay_text_source", "original")
     translate_target = params.get("ocr_translate_target", "es")
     subtitle_bg_color = params.get("ocr_subtitle_bg_color", (0, 0, 0))
     subtitle_bg_opacity = params.get("ocr_subtitle_bg_opacity", 100)
+    background_padding = params.get("ocr_background_padding", 4)
     
     # Throttling logic
     current_time = time.time()
@@ -242,11 +246,11 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
                 translated_texts.append(translated)
 
             if show_boxes:
-                draw_box_overlay(annotated_frame, bbox, font_color, box_thickness)
+                draw_box_overlay(annotated_frame, bbox, box_color, box_thickness, box_opacity)
 
             if show_text:
                 base_text = translated if overlay_text_source == "translation" and translated else text
-                overlay_text = f"{base_text} ({prob:.2f})"
+                overlay_text = f"{base_text} ({prob:.2f})" if show_conf else base_text
                 bg_color = subtitle_bg_color if text_background else None
                 draw_text_overlay(
                     annotated_frame,
@@ -258,6 +262,7 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
                     text_position,
                     bg_color,
                     subtitle_bg_opacity,
+                    background_padding,
                 )
 
     params["_last_ocr_texts"] = "\n".join(original_texts)
