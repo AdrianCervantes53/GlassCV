@@ -82,13 +82,6 @@ Upon launching, the following main windows will open:
 
 ## App Preview
 
-### Control Panel
-
-![GlassCV Control Panel](img/ui_v2.png)
-
-### Glass Overlay with OCR and translation
-
-![GlassCV Glass Overlay](img/ocr_translated.png)
 
 ### Using YOLO Object Detection
 
@@ -98,6 +91,10 @@ Upon launching, the following main windows will open:
 4. Toggle **Show Labels** and **Show Confidences** to control what information is displayed on detections.
 5. To use a custom-trained model, click **Custom...** and select your `.pt` file.
 
+### Control Panel with YOLO Object Detection
+
+![GlassCV Control Panel](img/ui_v2.png)
+
 ### Using EasyOCR Text Recognition
 
 1. In the Filter Chain section, select **EasyOCR Text Recognition** from the dropdown and click **＋ Add**.
@@ -106,6 +103,14 @@ Upon launching, the following main windows will open:
 4. Use the **Overlay** section to show or hide text, boxes, confidence scores, and text backgrounds.
 5. Customize text, detection boxes, and background styling from their respective subsections.
 6. Use the **Translation** section to select the target language, choose whether the overlay uses original or translated text, and run **Translate**.
+
+### Glass Overlay with OCR and translation
+
+![GlassCV Glass Overlay](img/ocr_translated.png)
+
+### OCR with Translation Panel
+
+![GlassCV OCR/Translation Overlay](img/ocr_and_translation_overlay.png)
 
 ## Project Structure
 
