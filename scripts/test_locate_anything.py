@@ -75,7 +75,7 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         return_tensors="pt",
     ).to(DEVICE, dtype=DTYPE)
 
-    # Inferencia — use_cache=True requerido por el generate() personalizado del modelo
+    # Inferencia — tokenizer requerido por generate() para calcular model_max_length
     t0 = time.time()
     with torch.inference_mode():
         output_ids = model.generate(
@@ -83,6 +83,7 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
             max_new_tokens=128,
             do_sample=False,
             use_cache=True,
+            tokenizer=processor.tokenizer,
         )
     elapsed = time.time() - t0
 
