@@ -68,10 +68,10 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         }
     ]
 
-    # Preprocesar
+    # Preprocesar — images debe ser una lista, no un objeto Image suelto
     inputs = processor(
         text=processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True),
-        images=image,
+        images=[image],
         return_tensors="pt",
     ).to(DEVICE, dtype=DTYPE)
 
