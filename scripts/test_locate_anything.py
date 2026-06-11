@@ -75,13 +75,14 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         return_tensors="pt",
     ).to(DEVICE, dtype=DTYPE)
 
-    # Inferencia (modo Fast: menor latencia)
+    # Inferencia — use_cache=True requerido por el generate() personalizado del modelo
     t0 = time.time()
     with torch.inference_mode():
         output_ids = model.generate(
             **inputs,
             max_new_tokens=128,
             do_sample=False,
+            use_cache=True,
         )
     elapsed = time.time() - t0
 
