@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from transformers import AutoModel, AutoProcessor
 
 # ---------------------------------------------------------------------------
@@ -34,8 +34,10 @@ PROMPT     = "Save image button"
 DTYPE  = torch.float16 if torch.cuda.is_available() else torch.float32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Espacio de coordenadas que usa el modelo internamente
 COORD_SPACE = 1000
+
+# Colores por detección (BGR no aplica, PIL usa RGB)
+COLORS = ["#FF4444", "#44AAFF", "#44FF88", "#FFB844", "#CC44FF"]
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +79,6 @@ class Detection:
 # ---------------------------------------------------------------------------
 
 def load_model() -> tuple:
-    """Carga el procesador y el modelo en el dispositivo disponible."""
     print(f"[INFO] Dispositivo: {DEVICE} | dtype: {DTYPE}")
     print(f"[INFO] Cargando modelo '{MODEL_ID}'...")
 
@@ -95,10 +96,7 @@ def load_model() -> tuple:
     return processor, model
 
 
-def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[list[Detection], float]:
-    """
-    Ejecuta inferencia de grounding y devuelve detecciones en píxeles reales.
-    """
+def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[Image.Image, list[Detection], float]:
     if not image_path.exists():
         raise FileNotFoundError(f"Imagen no encontrada: {image_path}")
 
@@ -135,7 +133,7 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[list
     elapsed = time.time() - t0
 
     detections = parse_detections(raw_output, img_w, img_h)
-    return detections, elapsed
+    return image, detections, elapsed
 
 
 # ---------------------------------------------------------------------------
@@ -143,16 +141,9 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[list
 # ---------------------------------------------------------------------------
 
 def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
-    """
-    Parsea el output del modelo al formato:
-        <ref>label</ref><box><x1><y1><x2><y2></box>
-
-    Convierte coordenadas de espacio normalizado (0–1000) a píxeles reales.
-    """
     pattern = re.compile(
         r"<ref>(.*?)</ref>\s*<box><(\d+)><(\d+)><(\d+)><(\d+)></box>"
     )
-
     scale_x = img_w / COORD_SPACE
     scale_y = img_h / COORD_SPACE
 
@@ -166,8 +157,53 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
             x2=round(int(x2) * scale_x),
             y2=round(int(y2) * scale_y),
         ))
-
     return detections
+
+
+# ---------------------------------------------------------------------------
+# Visualización
+# ---------------------------------------------------------------------------
+
+def draw_detections(image: Image.Image, detections: list[Detection]) -> Image.Image:
+    """Dibuja bounding boxes y labels sobre una copia de la imagen."""
+    result = image.copy()
+    draw = ImageDraw.Draw(result, "RGBA")
+
+    try:
+        font = ImageFont.truetype("arial.ttf", size=14)
+    except OSError:
+        font = ImageFont.load_default()
+
+    for i, det in enumerate(detections):
+        color = COLORS[i % len(COLORS)]
+
+        # Bounding box con fill semitransparente
+        draw.rectangle(
+            [det.x1, det.y1, det.x2, det.y2],
+            outline=color,
+            width=2,
+        )
+        draw.rectangle(
+            [det.x1, det.y1, det.x2, det.y2],
+            fill=(*ImageDraw.ImageDraw.getfont(draw) and (0, 0, 0, 0),),  # transparente
+        )
+
+        # Fondo del label
+        label_text = f"[{i+1}] {det.label}"
+        bbox = draw.textbbox((det.x1, det.y1), label_text, font=font)
+        padding = 2
+        draw.rectangle(
+            [bbox[0] - padding, bbox[1] - padding, bbox[2] + padding, bbox[3] + padding],
+            fill=color,
+        )
+        draw.text((det.x1, det.y1), label_text, fill="white", font=font)
+
+        # Punto central
+        cx, cy = det.center
+        r = 4
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +223,7 @@ def main() -> None:
 
     try:
         processor, model = load_model()
-        detections, elapsed = run_inference(processor, model, IMAGE_PATH, PROMPT)
+        image, detections, elapsed = run_inference(processor, model, IMAGE_PATH, PROMPT)
 
         print()
         print("=" * 60)
@@ -199,6 +235,9 @@ def main() -> None:
         else:
             for i, det in enumerate(detections, 1):
                 print(f"\n[{i}] {det}")
+
+            annotated = draw_detections(image, detections)
+            annotated.show(title=f"LocateAnything — '{PROMPT}'")
 
         print("=" * 60)
 
