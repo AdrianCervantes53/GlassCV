@@ -6,10 +6,17 @@ Uso:
 
 Requisitos previos:
     Ver scripts/LOCATE_ANYTHING_SETUP.md
+
+Formato de salida del modelo:
+    <ref>label</ref><box><x1><y1><x2><y2></box>
+    Coordenadas en espacio normalizado 0–1000. Se convierten a píxeles reales
+    multiplicando por (img_w / 1000, img_h / 1000).
 """
 
+import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -24,15 +31,55 @@ MODEL_ID   = "nvidia/LocateAnything-3B"
 IMAGE_PATH = Path("img/ui.png")
 PROMPT     = "Save image button"
 
-# fp16 en CUDA, float32 como fallback en CPU
-DTYPE      = torch.float16 if torch.cuda.is_available() else torch.float32
-DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE  = torch.float16 if torch.cuda.is_available() else torch.float32
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Espacio de coordenadas que usa el modelo internamente
+COORD_SPACE = 1000
+
+
+# ---------------------------------------------------------------------------
+# Tipos
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Detection:
+    label: str
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return ((self.x1 + self.x2) // 2, (self.y1 + self.y2) // 2)
+
+    @property
+    def width(self) -> int:
+        return self.x2 - self.x1
+
+    @property
+    def height(self) -> int:
+        return self.y2 - self.y1
+
+    def __str__(self) -> str:
+        cx, cy = self.center
+        return (
+            f"  label  : {self.label}\n"
+            f"  box    : ({self.x1}, {self.y1}) → ({self.x2}, {self.y2})\n"
+            f"  size   : {self.width}x{self.height} px\n"
+            f"  center : ({cx}, {cy})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Modelo
+# ---------------------------------------------------------------------------
 
 def load_model() -> tuple:
     """Carga el procesador y el modelo en el dispositivo disponible."""
     print(f"[INFO] Dispositivo: {DEVICE} | dtype: {DTYPE}")
-    print(f"[INFO] Cargando modelo '{MODEL_ID}' (primera vez descarga ~7 GB)...")
+    print(f"[INFO] Cargando modelo '{MODEL_ID}'...")
 
     t0 = time.time()
     processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -48,44 +95,18 @@ def load_model() -> tuple:
     return processor, model
 
 
-def parse_output(raw) -> dict:
+def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[list[Detection], float]:
     """
-    Normaliza el output de model.generate() al formato:
-        {"text": str, "type": str}
-
-    El generate() personalizado de LocateAnything no devuelve tensor de tokens
-    como el generate() estándar de HuggingFace — devuelve el resultado ya
-    procesado (str, list, o dict con coordenadas/texto).
+    Ejecuta inferencia de grounding y devuelve detecciones en píxeles reales.
     """
-    print(f"[DEBUG] output type : {type(raw)}")
-    print(f"[DEBUG] output value: {raw}")
-
-    if isinstance(raw, str):
-        return {"text": raw, "type": "str"}
-
-    if isinstance(raw, list):
-        return {"text": str(raw[0]) if raw else "", "type": "list"}
-
-    if isinstance(raw, dict):
-        return {"text": str(raw), "type": "dict"}
-
-    # Tensor de tokens (fallback por si acaso)
-    if isinstance(raw, torch.Tensor):
-        return {"text": f"<tensor shape={list(raw.shape)}>", "type": "tensor"}
-
-    return {"text": str(raw), "type": type(raw).__name__}
-
-
-def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
-    """Ejecuta inferencia de grounding sobre una imagen con un prompt de texto."""
     if not image_path.exists():
         raise FileNotFoundError(f"Imagen no encontrada: {image_path}")
 
     image = Image.open(image_path).convert("RGB")
-    print(f"[INFO] Imagen cargada: {image_path} ({image.size[0]}x{image.size[1]} px)")
+    img_w, img_h = image.size
+    print(f"[INFO] Imagen: {image_path} ({img_w}x{img_h} px)")
     print(f"[INFO] Prompt: '{prompt}'")
 
-    # Construir mensaje multimodal
     messages = [
         {
             "role": "user",
@@ -96,14 +117,12 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         }
     ]
 
-    # Preprocesar — images debe ser una lista, no un objeto Image suelto
     inputs = processor(
         text=processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True),
         images=[image],
         return_tensors="pt",
     ).to(DEVICE, dtype=DTYPE)
 
-    # Inferencia — tokenizer requerido por generate() para calcular model_max_length
     t0 = time.time()
     with torch.inference_mode():
         raw_output = model.generate(
@@ -115,10 +134,45 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         )
     elapsed = time.time() - t0
 
-    result = parse_output(raw_output)
-    result["elapsed"] = elapsed
-    return result
+    detections = parse_detections(raw_output, img_w, img_h)
+    return detections, elapsed
 
+
+# ---------------------------------------------------------------------------
+# Parser
+# ---------------------------------------------------------------------------
+
+def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
+    """
+    Parsea el output del modelo al formato:
+        <ref>label</ref><box><x1><y1><x2><y2></box>
+
+    Convierte coordenadas de espacio normalizado (0–1000) a píxeles reales.
+    """
+    pattern = re.compile(
+        r"<ref>(.*?)</ref>\s*<box><(\d+)><(\d+)><(\d+)><(\d+)></box>"
+    )
+
+    scale_x = img_w / COORD_SPACE
+    scale_y = img_h / COORD_SPACE
+
+    detections = []
+    for match in pattern.finditer(raw):
+        label, x1, y1, x2, y2 = match.groups()
+        detections.append(Detection(
+            label=label,
+            x1=round(int(x1) * scale_x),
+            y1=round(int(y1) * scale_y),
+            x2=round(int(x2) * scale_x),
+            y2=round(int(y2) * scale_y),
+        ))
+
+    return detections
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     print("=" * 60)
@@ -126,22 +180,26 @@ def main() -> None:
     print("=" * 60)
 
     if not torch.cuda.is_available():
-        print("[WARN] No se detectó GPU CUDA. La inferencia en CPU será lenta (~30–60s).")
+        print("[WARN] No se detectó GPU CUDA. La inferencia en CPU será lenta.")
     else:
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         print(f"[INFO] GPU: {torch.cuda.get_device_name(0)} | VRAM: {vram_gb:.1f} GB")
 
     try:
         processor, model = load_model()
-        result = run_inference(processor, model, IMAGE_PATH, PROMPT)
+        detections, elapsed = run_inference(processor, model, IMAGE_PATH, PROMPT)
 
         print()
         print("=" * 60)
-        print("RESULTADO")
+        print(f"RESULTADO  ({elapsed:.2f}s | {len(detections)} detección/es)")
         print("=" * 60)
-        print(f"Tiempo de inferencia : {result['elapsed']:.2f}s")
-        print(f"Output type          : {result['type']}")
-        print(f"Output               : {result['text']}")
+
+        if not detections:
+            print("[INFO] No se encontraron detecciones.")
+        else:
+            for i, det in enumerate(detections, 1):
+                print(f"\n[{i}] {det}")
+
         print("=" * 60)
 
     except FileNotFoundError as e:
