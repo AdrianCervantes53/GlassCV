@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QComboBox, QFileDialog, QCheckBox,
     QStackedWidget, QApplication, QListWidget, QAbstractItemView, QListWidgetItem,
-    QColorDialog, QSpinBox, QScrollArea, QFrame, QGridLayout
+    QColorDialog, QSpinBox, QScrollArea, QFrame, QGridLayout, QLineEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
@@ -14,21 +14,25 @@ from ui.widgets.collapsible_section import CollapsibleSection
 
 # Maps internal filter name -> the params it emits
 _FILTER_PARAM_KEYS = {
-    "canny":          ["canny_t1", "canny_t2"],
-    "rgb_mixer":      ["r_mult", "g_mult", "b_mult"],
-    "binary":         ["binary_threshold"],
-    "pixelated":      ["pixel_size"],
-    "colorblind":     ["cb_type"],
-    "object_counter": ["confidence"],
-    "smart_inverter": ["intensity"],
-    "symmetry":       ["symmetry_axis"],
-    "yolo":           ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
-    "ocr":            [
+    "canny":           ["canny_t1", "canny_t2"],
+    "rgb_mixer":       ["r_mult", "g_mult", "b_mult"],
+    "binary":          ["binary_threshold"],
+    "pixelated":       ["pixel_size"],
+    "colorblind":      ["cb_type"],
+    "object_counter":  ["confidence"],
+    "smart_inverter":  ["intensity"],
+    "symmetry":        ["symmetry_axis"],
+    "yolo":            ["yolo_model", "yolo_conf", "yolo_iou", "yolo_labels", "yolo_show_conf"],
+    "ocr":             [
         "ocr_langs", "ocr_conf", "ocr_font_color", "ocr_font_size",
         "ocr_font_thickness", "ocr_text_position", "ocr_show_text", "ocr_show_boxes",
         "ocr_show_conf", "ocr_box_thickness", "ocr_box_color", "ocr_box_opacity",
         "ocr_text_background", "ocr_overlay_text_source", "ocr_translate_target",
         "ocr_subtitle_bg_color", "ocr_subtitle_bg_opacity", "ocr_background_padding",
+    ],
+    "locate_anything": [
+        "la_box_color", "la_box_thickness", "la_font_scale",
+        "la_font_thickness", "la_show_labels", "la_show_center",
     ],
 }
 
@@ -52,12 +56,15 @@ class ControlWindow(QWidget):
     toggle_template_glass = pyqtSignal(bool)
     request_template_capture = pyqtSignal()
     translate_requested = pyqtSignal()
+    # LocateAnything signals
+    locate_requested = pyqtSignal(str)   # prompt string
+    locate_cleared   = pyqtSignal()
 
     ALL_FILTERS = [
         "normal", "grayscale", "canny", "mirror", "symmetry",
         "rgb_mixer", "binary", "pixelated",
         "colorblind", "object_counter", "smart_inverter",
-        "yolo", "ocr",
+        "yolo", "ocr", "locate_anything",
     ]
 
     AVAILABLE_YOLO_MODELS = [
@@ -73,6 +80,7 @@ class ControlWindow(QWidget):
         self._ocr_font_color = (255, 255, 255)
         self._ocr_box_color = (255, 255, 255)
         self._ocr_subtitle_bg_color = (0, 0, 0)
+        self._la_box_color = (68, 255, 68)   # BGR green
         self._setup_ui()
         self._apply_styles()
 
@@ -631,18 +639,107 @@ class ControlWindow(QWidget):
         self.stacked_params.addWidget(self.ocr_page)
         self._on_ocr_text_background_toggled(False)
 
+        # ── LocateAnything ────────────────────────────────────────────
+        self.locate_page = QWidget()
+        locate_layout = QVBoxLayout(self.locate_page)
+        locate_layout.setContentsMargins(0, 4, 0, 0)
+        locate_layout.setSpacing(6)
+
+        # Prompt input
+        prompt_row = QHBoxLayout()
+        self.edit_la_prompt = QLineEdit()
+        self.edit_la_prompt.setPlaceholderText('e.g. "Save image button"')
+        self.edit_la_prompt.returnPressed.connect(self._on_la_locate_clicked)
+        prompt_row.addWidget(QLabel("Prompt:"))
+        prompt_row.addWidget(self.edit_la_prompt, stretch=1)
+
+        # Action buttons
+        action_row = QHBoxLayout()
+        self.btn_la_locate = QPushButton("Locate Now!")
+        self.btn_la_locate.clicked.connect(self._on_la_locate_clicked)
+        self.btn_la_clear = QPushButton("Clear")
+        self.btn_la_clear.clicked.connect(self._on_la_clear_clicked)
+        action_row.addWidget(self.btn_la_locate)
+        action_row.addWidget(self.btn_la_clear)
+
+        # Status label
+        self.lbl_la_status = QLabel("Inference: ~72s on RTX 4060 · ~90s on first run (model load)")
+        self.lbl_la_status.setWordWrap(True)
+        self.lbl_la_status.setStyleSheet("color: #888; font-size: 11px;")
+
+        # Style section
+        la_style_section = CollapsibleSection("Style", expanded=False)
+        la_style_layout = QVBoxLayout()
+        la_style_layout.setContentsMargins(0, 0, 0, 0)
+
+        la_color_row = QHBoxLayout()
+        self.btn_la_box_color = QPushButton("Box Color")
+        self.btn_la_box_color.clicked.connect(self._on_la_box_color_clicked)
+        self._update_color_button(self.btn_la_box_color, self._la_box_color)
+        la_color_row.addWidget(QLabel("Box Color:"))
+        la_color_row.addWidget(self.btn_la_box_color)
+
+        la_box_thick_row = QHBoxLayout()
+        self.spin_la_box_thickness = QSpinBox()
+        self.spin_la_box_thickness.setRange(1, 8)
+        self.spin_la_box_thickness.setValue(2)
+        self.spin_la_box_thickness.valueChanged.connect(self._on_la_params_changed)
+        la_box_thick_row.addWidget(QLabel("Box Thickness:"))
+        la_box_thick_row.addWidget(self.spin_la_box_thickness)
+
+        la_font_scale_row = QHBoxLayout()
+        self.lbl_la_font_scale = QLabel("Font Scale (0.1–2.0): 0.5")
+        self.slider_la_font_scale = QSlider(Qt.Orientation.Horizontal)
+        self.slider_la_font_scale.setRange(1, 20)
+        self.slider_la_font_scale.setValue(5)
+        self.slider_la_font_scale.valueChanged.connect(self._on_la_params_changed)
+        la_font_scale_row.addWidget(self.lbl_la_font_scale)
+        la_font_scale_row.addWidget(self.slider_la_font_scale)
+
+        la_font_thick_row = QHBoxLayout()
+        self.spin_la_font_thickness = QSpinBox()
+        self.spin_la_font_thickness.setRange(1, 4)
+        self.spin_la_font_thickness.setValue(1)
+        self.spin_la_font_thickness.valueChanged.connect(self._on_la_params_changed)
+        la_font_thick_row.addWidget(QLabel("Font Thickness:"))
+        la_font_thick_row.addWidget(self.spin_la_font_thickness)
+
+        la_chk_row = QHBoxLayout()
+        self.chk_la_show_labels = QCheckBox("Show Labels")
+        self.chk_la_show_labels.setChecked(True)
+        self.chk_la_show_labels.toggled.connect(self._on_la_params_changed)
+        self.chk_la_show_center = QCheckBox("Show Center Dot")
+        self.chk_la_show_center.setChecked(True)
+        self.chk_la_show_center.toggled.connect(self._on_la_params_changed)
+        la_chk_row.addWidget(self.chk_la_show_labels)
+        la_chk_row.addWidget(self.chk_la_show_center)
+
+        la_style_layout.addLayout(la_color_row)
+        la_style_layout.addLayout(la_box_thick_row)
+        la_style_layout.addLayout(la_font_scale_row)
+        la_style_layout.addLayout(la_font_thick_row)
+        la_style_layout.addLayout(la_chk_row)
+        la_style_section.set_content_layout(la_style_layout)
+
+        locate_layout.addLayout(prompt_row)
+        locate_layout.addLayout(action_row)
+        locate_layout.addWidget(self.lbl_la_status)
+        locate_layout.addWidget(la_style_section)
+        self.stacked_params.addWidget(self.locate_page)
+
         # Map filter name -> param page widget
         self._param_page_map = {
-            "canny":          self.canny_page,
-            "rgb_mixer":      self.rgb_page,
-            "binary":         self.binary_page,
-            "pixelated":      self.pix_page,
-            "colorblind":     self.cb_page,
-            "object_counter": self.obj_page,
-            "smart_inverter": self.inv_page,
-            "symmetry":       self.sym_page,
-            "yolo":           self.yolo_page,
-            "ocr":            self.ocr_page,
+            "canny":           self.canny_page,
+            "rgb_mixer":       self.rgb_page,
+            "binary":          self.binary_page,
+            "pixelated":       self.pix_page,
+            "colorblind":      self.cb_page,
+            "object_counter":  self.obj_page,
+            "smart_inverter":  self.inv_page,
+            "symmetry":        self.sym_page,
+            "yolo":            self.yolo_page,
+            "ocr":             self.ocr_page,
+            "locate_anything": self.locate_page,
         }
 
     # ------------------------------------------------------------------
@@ -713,6 +810,16 @@ class ControlWindow(QWidget):
                 border: 1px solid #555;
                 border-radius: 3px;
                 padding: 4px;
+            }
+            QLineEdit {
+                background-color: #1e1e1e;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 4px 6px;
+                color: #e0e0e0;
+            }
+            QLineEdit:focus {
+                border: 1px solid #2b5797;
             }
             QListWidget {
                 background-color: #1e1e1e;
@@ -805,6 +912,8 @@ class ControlWindow(QWidget):
             }
         if filter_name == "ocr":
             return self._get_ocr_params()
+        if filter_name == "locate_anything":
+            return self._get_la_params()
         return {}
 
     def _emit_chain(self):
@@ -1071,6 +1180,59 @@ class ControlWindow(QWidget):
         self.lbl_ocr_bg_opacity.setText(f"Bg Opacity (0-100%): {bg_opacity}")
         self.lbl_ocr_bg_padding.setText(f"Padding (0-20): {bg_padding}")
         self._emit_filter_params(self._get_ocr_params())
+
+    # ── LocateAnything handlers ────────────────────────────────────────
+
+    def _get_la_params(self) -> dict:
+        return {
+            "la_box_color":     self._la_box_color,
+            "la_box_thickness": self.spin_la_box_thickness.value(),
+            "la_font_scale":    self.slider_la_font_scale.value() / 10.0,
+            "la_font_thickness": self.spin_la_font_thickness.value(),
+            "la_show_labels":   self.chk_la_show_labels.isChecked(),
+            "la_show_center":   self.chk_la_show_center.isChecked(),
+        }
+
+    def _on_la_locate_clicked(self):
+        prompt = self.edit_la_prompt.text().strip()
+        if not prompt:
+            return
+        self.btn_la_locate.setText("Processing...")
+        self.btn_la_locate.setEnabled(False)
+        self.lbl_la_status.setStyleSheet("color: #888; font-size: 11px;")
+        self.lbl_la_status.setText("Running inference, please wait…")
+        self.locate_requested.emit(prompt)
+
+    def _on_la_clear_clicked(self):
+        self.lbl_la_status.setStyleSheet("color: #888; font-size: 11px;")
+        self.lbl_la_status.setText("")
+        self.locate_cleared.emit()
+
+    def _on_la_box_color_clicked(self):
+        color = QColorDialog.getColor(self._bgr_to_qcolor(self._la_box_color), self, "Select Box Color")
+        if color.isValid():
+            self._la_box_color = self._qcolor_to_bgr(color)
+            self._update_color_button(self.btn_la_box_color, self._la_box_color)
+            self._on_la_params_changed()
+
+    def _on_la_params_changed(self):
+        val = self.slider_la_font_scale.value()
+        self.lbl_la_font_scale.setText(f"Font Scale (0.1–2.0): {val / 10:.1f}")
+        self._emit_filter_params(self._get_la_params())
+
+    def on_locate_finished(self):
+        """Called by main.py when inference completes successfully."""
+        self.btn_la_locate.setText("Locate Now!")
+        self.btn_la_locate.setEnabled(True)
+        self.lbl_la_status.setStyleSheet("color: #88cc88; font-size: 11px;")
+        self.lbl_la_status.setText("Done.")
+
+    def on_locate_failed(self, error_msg: str):
+        """Called by main.py when inference fails."""
+        self.btn_la_locate.setText("Locate Now!")
+        self.btn_la_locate.setEnabled(True)
+        self.lbl_la_status.setStyleSheet("color: #ff6666; font-size: 11px;")
+        self.lbl_la_status.setText(f"Error: {error_msg}")
 
     # ------------------------------------------------------------------
     # Other slot handlers
