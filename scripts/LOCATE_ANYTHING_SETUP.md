@@ -6,14 +6,16 @@ Instrucciones para instalar las dependencias necesarias para correr el script de
 
 ## Dependencias nuevas
 
-| Paquete | Versión mínima | Notas |
+| Paquete | Versión requerida | Notas |
 |---|---|---|
-| `transformers` | `>=4.51.0` | API multimodal estable para VLMs |
+| `transformers` | `>=4.51.0,<5.0.0` | **Debe ser 4.x** — v5 tiene breaking changes incompatibles con el custom code del modelo |
 | `accelerate` | `>=0.34.0` | Requerido por `device_map` en `AutoModel` |
 | `Pillow` | `>=10.0.0` | Procesamiento de imágenes (probablemente ya instalado) |
 | `torch` | `>=2.1.0` + CUDA | Ya en el stack de GlassCV |
 
 > `tokenizers` y `safetensors` se instalan automáticamente como dependencias de `transformers`.
+
+> ⚠️ **No usar `transformers>=5.x`:** en v5 se renombró `config.rope_theta` a `config.rope_parameters['rope_theta']`. El custom code de LocateAnything accede al atributo con la API antigua y lanza `AttributeError: 'Qwen2Config' object has no attribute 'rope_theta'`.
 
 ---
 
@@ -22,13 +24,19 @@ Instrucciones para instalar las dependencias necesarias para correr el script de
 ### Con uv (recomendado)
 
 ```bash
-uv add "transformers>=4.51.0" "accelerate>=0.34.0" "Pillow>=10.0.0"
+uv add "transformers>=4.51.0,<5.0.0" "accelerate>=0.34.0" "Pillow>=10.0.0"
 ```
 
 ### Con pip
 
 ```bash
-pip install "transformers>=4.51.0" "accelerate>=0.34.0" "Pillow>=10.0.0"
+pip install "transformers>=4.51.0,<5.0.0" "accelerate>=0.34.0" "Pillow>=10.0.0"
+```
+
+Si ya tienes `transformers>=5.x` instalado, hacer downgrade explícito:
+
+```bash
+pip install "transformers==4.51.3"
 ```
 
 ---
@@ -71,4 +79,5 @@ Solución: cerrar otras aplicaciones con GPU antes de correr el script.
 
 ```bash
 python -c "import transformers; import accelerate; print(transformers.__version__, accelerate.__version__)"
+# Esperado: 4.51.x (o superior dentro de 4.x)  1.x.x
 ```
