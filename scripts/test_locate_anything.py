@@ -48,6 +48,34 @@ def load_model() -> tuple:
     return processor, model
 
 
+def parse_output(raw) -> dict:
+    """
+    Normaliza el output de model.generate() al formato:
+        {"text": str, "type": str}
+
+    El generate() personalizado de LocateAnything no devuelve tensor de tokens
+    como el generate() estándar de HuggingFace — devuelve el resultado ya
+    procesado (str, list, o dict con coordenadas/texto).
+    """
+    print(f"[DEBUG] output type : {type(raw)}")
+    print(f"[DEBUG] output value: {raw}")
+
+    if isinstance(raw, str):
+        return {"text": raw, "type": "str"}
+
+    if isinstance(raw, list):
+        return {"text": str(raw[0]) if raw else "", "type": "list"}
+
+    if isinstance(raw, dict):
+        return {"text": str(raw), "type": "dict"}
+
+    # Tensor de tokens (fallback por si acaso)
+    if isinstance(raw, torch.Tensor):
+        return {"text": f"<tensor shape={list(raw.shape)}>", "type": "tensor"}
+
+    return {"text": str(raw), "type": type(raw).__name__}
+
+
 def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
     """Ejecuta inferencia de grounding sobre una imagen con un prompt de texto."""
     if not image_path.exists():
@@ -78,7 +106,7 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
     # Inferencia — tokenizer requerido por generate() para calcular model_max_length
     t0 = time.time()
     with torch.inference_mode():
-        output_ids = model.generate(
+        raw_output = model.generate(
             **inputs,
             max_new_tokens=128,
             do_sample=False,
@@ -87,11 +115,9 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> dict:
         )
     elapsed = time.time() - t0
 
-    # Decodificar respuesta
-    generated = output_ids[:, inputs["input_ids"].shape[1]:]
-    raw_output = processor.batch_decode(generated, skip_special_tokens=True)[0]
-
-    return {"raw": raw_output, "elapsed": elapsed}
+    result = parse_output(raw_output)
+    result["elapsed"] = elapsed
+    return result
 
 
 def main() -> None:
@@ -99,7 +125,6 @@ def main() -> None:
     print("LocateAnything-3B — Test de inferencia")
     print("=" * 60)
 
-    # Advertencia si no hay GPU
     if not torch.cuda.is_available():
         print("[WARN] No se detectó GPU CUDA. La inferencia en CPU será lenta (~30–60s).")
     else:
@@ -115,7 +140,8 @@ def main() -> None:
         print("RESULTADO")
         print("=" * 60)
         print(f"Tiempo de inferencia : {result['elapsed']:.2f}s")
-        print(f"Output raw           : {result['raw']}")
+        print(f"Output type          : {result['type']}")
+        print(f"Output               : {result['text']}")
         print("=" * 60)
 
     except FileNotFoundError as e:
