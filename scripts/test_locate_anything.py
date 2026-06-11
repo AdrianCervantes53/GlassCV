@@ -35,8 +35,6 @@ DTYPE  = torch.float16 if torch.cuda.is_available() else torch.float32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 COORD_SPACE = 1000
-
-# Colores por detección (BGR no aplica, PIL usa RGB)
 COLORS = ["#FF4444", "#44AAFF", "#44FF88", "#FFB844", "#CC44FF"]
 
 
@@ -166,8 +164,9 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
 
 def draw_detections(image: Image.Image, detections: list[Detection]) -> Image.Image:
     """Dibuja bounding boxes y labels sobre una copia de la imagen."""
-    result = image.copy()
-    draw = ImageDraw.Draw(result, "RGBA")
+    result = image.copy().convert("RGBA")
+    overlay = Image.new("RGBA", result.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
     try:
         font = ImageFont.truetype("arial.ttf", size=14)
@@ -175,35 +174,31 @@ def draw_detections(image: Image.Image, detections: list[Detection]) -> Image.Im
         font = ImageFont.load_default()
 
     for i, det in enumerate(detections):
-        color = COLORS[i % len(COLORS)]
+        color_hex = COLORS[i % len(COLORS)]
+        r, g, b = tuple(int(color_hex.lstrip("#")[j:j+2], 16) for j in (0, 2, 4))
+        color_solid = (r, g, b, 255)
+        color_fill  = (r, g, b, 50)
 
-        # Bounding box con fill semitransparente
-        draw.rectangle(
-            [det.x1, det.y1, det.x2, det.y2],
-            outline=color,
-            width=2,
-        )
-        draw.rectangle(
-            [det.x1, det.y1, det.x2, det.y2],
-            fill=(*ImageDraw.ImageDraw.getfont(draw) and (0, 0, 0, 0),),  # transparente
-        )
+        # Box con fill semitransparente
+        draw.rectangle([det.x1, det.y1, det.x2, det.y2], fill=color_fill, outline=color_solid, width=2)
 
         # Fondo del label
         label_text = f"[{i+1}] {det.label}"
         bbox = draw.textbbox((det.x1, det.y1), label_text, font=font)
-        padding = 2
+        pad = 2
         draw.rectangle(
-            [bbox[0] - padding, bbox[1] - padding, bbox[2] + padding, bbox[3] + padding],
-            fill=color,
+            [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad],
+            fill=color_solid,
         )
-        draw.text((det.x1, det.y1), label_text, fill="white", font=font)
+        draw.text((det.x1, det.y1), label_text, fill=(255, 255, 255, 255), font=font)
 
         # Punto central
         cx, cy = det.center
-        r = 4
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
+        r_dot = 4
+        draw.ellipse([cx - r_dot, cy - r_dot, cx + r_dot, cy + r_dot], fill=color_solid)
 
-    return result
+    result = Image.alpha_composite(result, overlay)
+    return result.convert("RGB")
 
 
 # ---------------------------------------------------------------------------
