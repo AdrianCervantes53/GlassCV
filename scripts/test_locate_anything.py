@@ -96,7 +96,9 @@ def load_model() -> tuple:
     return processor, model
 
 
-def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[Image.Image, list[Detection], float, str]:
+def run_inference(
+    processor, model, image_path: Path, prompt: str
+) -> tuple[Image.Image, list["Detection"], float, str]:
     if not image_path.exists():
         raise FileNotFoundError(f"Imagen no encontrada: {image_path}")
 
@@ -105,21 +107,34 @@ def run_inference(processor, model, image_path: Path, prompt: str) -> tuple[Imag
     print(f"[INFO] Imagen: {image_path} ({img_w}x{img_h} px)")
     print(f"[INFO] Prompt: '{prompt}'")
 
+    # Imagen embebida en el content — requerido por process_vision_info
+    # (Qwen2.5-VL API). Pasarla por separado como images=[image] omite este
+    # pipeline y produce boxes degenerados <0><0><998><998>.
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image"},
+                {"type": "image", "image": image},
                 {"type": "text", "text": prompt},
             ],
         }
     ]
 
-    inputs = processor(
-        text=processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True),
-        images=[image],
-        return_tensors="pt",
-    ).to(DEVICE, dtype=DTYPE)
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    image_inputs, video_inputs = processor.process_vision_info(messages)
+
+    processor_kwargs = {
+        "text":           [text],
+        "images":         image_inputs,
+        "return_tensors": "pt",
+    }
+    if video_inputs:
+        processor_kwargs["videos"] = video_inputs
+
+    inputs = processor(**processor_kwargs).to(DEVICE, dtype=DTYPE)
 
     t0 = time.time()
     with torch.inference_mode():
@@ -164,7 +179,6 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
         boxes_str = ref_match.group(2)
         all_boxes = box_pattern.findall(boxes_str)
 
-        # Saltar el primer box (agregado PBD) cuando hay múltiples instancias
         instance_boxes = all_boxes[1:] if len(all_boxes) > 1 else all_boxes
 
         for x1, y1, x2, y2 in instance_boxes:
@@ -236,7 +250,7 @@ def main() -> None:
         print("=" * 60)
         print(f"RESULTADO  ({elapsed:.2f}s | {len(detections)} detección/es)")
         print("=" * 60)
-        print(f"Raw output: {raw}")
+        print(f"Raw: {raw}")
         print()
 
         if not detections:
