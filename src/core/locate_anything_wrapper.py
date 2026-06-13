@@ -8,13 +8,20 @@ Dependencies (see scripts/LOCATE_ANYTHING_SETUP.md):
     transformers>=4.51.0,<5.0.0
     accelerate>=0.34.0
     Pillow>=10.0.0
-    torch (CUDA recommended, CPU fallback available — ~90s first inference on CPU)
+    torch (CUDA recommended, CPU fallback available)
 
 Output format (Parallel Box Decoding):
     <ref>label</ref><box><avg></box><box><inst1></box><box><inst2></box>
     When multiple boxes follow one <ref>, the FIRST is a PBD aggregate box
     (average over all instances) and the rest are individual detections.
     parse_detections() handles this by skipping the aggregate when N > 1.
+
+Key implementation notes:
+    - Use bfloat16 (not float16) — more numerically stable for this model.
+    - Pass inputs individually to model.generate(), NOT via **inputs.to(dtype).
+      Doing inputs.to(dtype=float16) corrupts image_grid_hws (int64 → float16)
+      which destroys the image patch geometry and produces <0><0><998><998> boxes.
+    - image_grid_hws must be passed as an int tensor; never cast it to float.
 """
 
 from __future__ import annotations
@@ -30,9 +37,11 @@ import torch
 # ---------------------------------------------------------------------------
 
 MODEL_ID    = "nvidia/LocateAnything-3B"
-COORD_SPACE = 1000  # Model outputs coordinates normalized to a 0–1000 space
-DTYPE       = torch.float16 if torch.cuda.is_available() else torch.float32
-DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
+COORD_SPACE = 1000
+
+# bfloat16 preferred over float16 — better numerical stability for this model
+DTYPE  = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------------------------------------------------------------------------
 # Lazy model state (module-level singletons)
@@ -77,9 +86,6 @@ def get_locate_anything_model() -> tuple:
     """
     Load and return (processor, model), caching after the first call.
 
-    The model is ~7 GB on disk and takes ~16s to load into VRAM on first call.
-    Subsequent calls return the cached instance immediately.
-
     Raises:
         torch.cuda.OutOfMemoryError: If VRAM is insufficient to load the model.
         ImportError: If transformers or accelerate are not installed.
@@ -89,7 +95,7 @@ def get_locate_anything_model() -> tuple:
     if _MODEL is not None and _PROCESSOR is not None:
         return _PROCESSOR, _MODEL
 
-    from transformers import AutoModel, AutoProcessor
+    from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
     _PROCESSOR = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
     _MODEL = AutoModel.from_pretrained(
@@ -123,30 +129,19 @@ def run_inference(
 
     Returns:
         List of Detection instances with pixel-space bounding-box coordinates.
-
-    Note:
-        Inference takes ~72s on an RTX 4060 8 GB (fp16).
-        The model uses process_vision_info (Qwen2.5-VL API) to preprocess
-        images — passing images directly to the processor without embedding
-        them in the message content produces degenerate <0><0><998><998> boxes.
     """
     import cv2
     from PIL import Image
 
-    # BGR numpy → RGB PIL (required by the model processor)
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     image     = Image.fromarray(frame_rgb)
     img_w, img_h = image.size
 
-    # Embed the image inside the message content — required by Qwen2.5-VL's
-    # process_vision_info pipeline. Passing images=[image] separately to the
-    # processor skips this pipeline and causes the model to output full-image
-    # boxes (<0><0><998><998>) because it doesn't actually see the image.
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
+                {"type": "image"},
                 {"type": "text", "text": prompt},
             ],
         }
@@ -156,25 +151,24 @@ def run_inference(
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    image_inputs, video_inputs = processor.process_vision_info(messages)
+    inputs = processor(
+        images=[image],
+        text=text,
+        return_tensors="pt",
+    )
 
-    processor_kwargs = {
-        "text":         [text],
-        "images":       image_inputs,
-        "return_tensors": "pt",
-    }
-    if video_inputs:
-        processor_kwargs["videos"] = video_inputs
-
-    inputs = processor(**processor_kwargs).to(DEVICE, dtype=DTYPE)
-
+    # Pass each tensor individually — NEVER do inputs.to(dtype=float) on the
+    # whole dict. image_grid_hws is int64 and must stay int64; casting it to
+    # float16 corrupts the image patch geometry and produces degenerate boxes.
     with torch.inference_mode():
         raw_output = model.generate(
-            **inputs,
-            max_new_tokens=128,
-            do_sample=False,
-            use_cache=True,
+            input_ids=inputs["input_ids"].to(DEVICE),
+            attention_mask=inputs["attention_mask"].to(DEVICE),
+            pixel_values=inputs["pixel_values"].to(DEVICE, dtype=DTYPE),
+            image_grid_hws=torch.tensor(inputs["image_grid_hws"]).to(DEVICE),
             tokenizer=processor.tokenizer,
+            use_cache=True,
+            max_new_tokens=64,
         )
 
     return parse_detections(raw_output, img_w, img_h)
@@ -195,8 +189,6 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
     The first <box> is a PBD aggregate (average of all instances) and is
     skipped when N > 1. When only one box is present it is a genuine single
     detection and is kept as-is.
-
-    Coordinates are in a normalized 0–1000 space, scaled to pixel space.
     """
     ref_pattern = re.compile(
         r"<ref>(.*?)</ref>((?:\s*<box><\d+><\d+><\d+><\d+></box>)+)"
@@ -215,7 +207,6 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
         boxes_str = ref_match.group(2)
         all_boxes = box_pattern.findall(boxes_str)
 
-        # Skip the first box (PBD aggregate) when multiple instances are present
         instance_boxes = all_boxes[1:] if len(all_boxes) > 1 else all_boxes
 
         for x1, y1, x2, y2 in instance_boxes:
