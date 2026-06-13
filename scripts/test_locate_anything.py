@@ -13,6 +13,13 @@ Formato de salida del modelo (Parallel Box Decoding):
     (promedio de todas las instancias) y se descarta. Si solo hay un <box>,
     se trata como detección individual y se mantiene.
     Coordenadas en espacio normalizado 0–1000 → píxeles reales.
+
+Notas de implementación clave:
+    - Usar bfloat16, NO float16 — mayor estabilidad numérica para este modelo.
+    - Pasar los tensores individualmente a model.generate(), NO con **inputs.to(dtype).
+      Hacer inputs.to(dtype=float16) corrompe image_grid_hws (int64 → float16)
+      lo que destruye la geometría de los patches y produce boxes <0><0><998><998>.
+    - image_grid_hws debe pasarse como tensor int; nunca castearlo a float.
 """
 
 import re
@@ -30,11 +37,10 @@ from transformers import AutoModel, AutoProcessor
 # ---------------------------------------------------------------------------
 
 MODEL_ID   = "nvidia/LocateAnything-3B"
-#IMAGE_PATH = Path("img/ui.png")
-IMAGE_PATH = Path("img/potato.jpg")
-PROMPT     = "potato"
+IMAGE_PATH = Path("img/ui.png")
+PROMPT     = "Save image button"
 
-DTYPE  = torch.float16 if torch.cuda.is_available() else torch.float32
+DTYPE  = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 COORD_SPACE = 1000
@@ -99,7 +105,7 @@ def load_model() -> tuple:
 
 def run_inference(
     processor, model, image_path: Path, prompt: str
-) -> tuple[Image.Image, list["Detection"], float, str]:
+) -> tuple[Image.Image, list[Detection], float, str]:
     if not image_path.exists():
         raise FileNotFoundError(f"Imagen no encontrada: {image_path}")
 
@@ -108,14 +114,11 @@ def run_inference(
     print(f"[INFO] Imagen: {image_path} ({img_w}x{img_h} px)")
     print(f"[INFO] Prompt: '{prompt}'")
 
-    # Imagen embebida en el content — requerido por process_vision_info
-    # (Qwen2.5-VL API). Pasarla por separado como images=[image] omite este
-    # pipeline y produce boxes degenerados <0><0><998><998>.
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
+                {"type": "image"},
                 {"type": "text", "text": prompt},
             ],
         }
@@ -125,26 +128,26 @@ def run_inference(
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    image_inputs, video_inputs = processor.process_vision_info(messages)
+    inputs = processor(
+        images=[image],
+        text=text,
+        return_tensors="pt",
+    )
 
-    processor_kwargs = {
-        "text":           [text],
-        "images":         image_inputs,
-        "return_tensors": "pt",
-    }
-    if video_inputs:
-        processor_kwargs["videos"] = video_inputs
-
-    inputs = processor(**processor_kwargs).to(DEVICE, dtype=DTYPE)
-
+    # Pasar cada tensor individualmente — NUNCA hacer inputs.to(dtype=float)
+    # en el dict completo. image_grid_hws es int64 y debe mantenerse así;
+    # castearlo a float16 corrompe la geometría de los patches de imagen
+    # y produce boxes degenerados <0><0><998><998>.
     t0 = time.time()
     with torch.inference_mode():
         raw_output = model.generate(
-            **inputs,
-            max_new_tokens=128,
-            do_sample=False,
-            use_cache=True,
+            input_ids=inputs["input_ids"].to(DEVICE),
+            attention_mask=inputs["attention_mask"].to(DEVICE),
+            pixel_values=inputs["pixel_values"].to(DEVICE, dtype=DTYPE),
+            image_grid_hws=torch.tensor(inputs["image_grid_hws"]).to(DEVICE),
             tokenizer=processor.tokenizer,
+            use_cache=True,
+            max_new_tokens=64,
         )
     elapsed = time.time() - t0
 
