@@ -30,8 +30,9 @@ from transformers import AutoModel, AutoProcessor
 # ---------------------------------------------------------------------------
 
 MODEL_ID   = "nvidia/LocateAnything-3B"
-IMAGE_PATH = Path("img/ui.png")
-PROMPT     = "Save image button"
+#IMAGE_PATH = Path("img/ui.png")
+IMAGE_PATH = Path("img/potato.jpg")
+PROMPT     = "potato"
 
 DTYPE  = torch.float16 if torch.cuda.is_available() else torch.float32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
