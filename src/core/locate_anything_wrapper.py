@@ -126,7 +126,9 @@ def run_inference(
 
     Note:
         Inference takes ~72s on an RTX 4060 8 GB (fp16).
-        The model returns all visually matching elements, not just the best match.
+        The model uses process_vision_info (Qwen2.5-VL API) to preprocess
+        images — passing images directly to the processor without embedding
+        them in the message content produces degenerate <0><0><998><998> boxes.
     """
     import cv2
     from PIL import Image
@@ -136,21 +138,35 @@ def run_inference(
     image     = Image.fromarray(frame_rgb)
     img_w, img_h = image.size
 
+    # Embed the image inside the message content — required by Qwen2.5-VL's
+    # process_vision_info pipeline. Passing images=[image] separately to the
+    # processor skips this pipeline and causes the model to output full-image
+    # boxes (<0><0><998><998>) because it doesn't actually see the image.
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image"},
+                {"type": "image", "image": image},
                 {"type": "text", "text": prompt},
             ],
         }
     ]
 
-    inputs = processor(
-        text=processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True),
-        images=[image],
-        return_tensors="pt",
-    ).to(DEVICE, dtype=DTYPE)
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    image_inputs, video_inputs = processor.process_vision_info(messages)
+
+    processor_kwargs = {
+        "text":         [text],
+        "images":       image_inputs,
+        "return_tensors": "pt",
+    }
+    if video_inputs:
+        processor_kwargs["videos"] = video_inputs
+
+    inputs = processor(**processor_kwargs).to(DEVICE, dtype=DTYPE)
 
     with torch.inference_mode():
         raw_output = model.generate(
@@ -197,7 +213,7 @@ def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
     for ref_match in ref_pattern.finditer(raw):
         label     = ref_match.group(1)
         boxes_str = ref_match.group(2)
-        all_boxes = box_pattern.findall(boxes_str)  # list of (x1, y1, x2, y2) str tuples
+        all_boxes = box_pattern.findall(boxes_str)
 
         # Skip the first box (PBD aggregate) when multiple instances are present
         instance_boxes = all_boxes[1:] if len(all_boxes) > 1 else all_boxes
