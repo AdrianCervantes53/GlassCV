@@ -9,6 +9,12 @@ Dependencies (see scripts/LOCATE_ANYTHING_SETUP.md):
     accelerate>=0.34.0
     Pillow>=10.0.0
     torch (CUDA recommended, CPU fallback available — ~90s first inference on CPU)
+
+Output format (Parallel Box Decoding):
+    <ref>label</ref><box><avg></box><box><inst1></box><box><inst2></box>
+    When multiple boxes follow one <ref>, the FIRST is a PBD aggregate box
+    (average over all instances) and the rest are individual detections.
+    parse_detections() handles this by skipping the aggregate when N > 1.
 """
 
 from __future__ import annotations
@@ -164,28 +170,45 @@ def run_inference(
 
 def parse_detections(raw: str, img_w: int, img_h: int) -> list[Detection]:
     """
-    Parse model output string into Detection instances.
+    Parse model output into Detection instances.
 
-    Model output format:
-        <ref>label</ref><box><x1><y1><x2><y2></box>
+    The model uses Parallel Box Decoding (PBD): when multiple instances of an
+    object are found, the output is:
+        <ref>label</ref><box><avg></box><box><inst1></box><box><inst2></box>
 
-    Coordinates are in a normalized 0–1000 space and are scaled to pixel space
-    using the actual image dimensions.
+    The first <box> is a PBD aggregate (average of all instances) and is
+    skipped when N > 1. When only one box is present it is a genuine single
+    detection and is kept as-is.
+
+    Coordinates are in a normalized 0–1000 space, scaled to pixel space.
     """
-    pattern = re.compile(
-        r"<ref>(.*?)</ref>\s*<box><(\d+)><(\d+)><(\d+)><(\d+)></box>"
+    ref_pattern = re.compile(
+        r"<ref>(.*?)</ref>((?:\s*<box><\d+><\d+><\d+><\d+></box>)+)"
     )
+    box_pattern = re.compile(
+        r"<box><(\d+)><(\d+)><(\d+)><(\d+)></box>"
+    )
+
     scale_x = img_w / COORD_SPACE
     scale_y = img_h / COORD_SPACE
 
     detections: list[Detection] = []
-    for match in pattern.finditer(raw):
-        label, x1, y1, x2, y2 = match.groups()
-        detections.append(Detection(
-            label=label,
-            x1=round(int(x1) * scale_x),
-            y1=round(int(y1) * scale_y),
-            x2=round(int(x2) * scale_x),
-            y2=round(int(y2) * scale_y),
-        ))
+
+    for ref_match in ref_pattern.finditer(raw):
+        label     = ref_match.group(1)
+        boxes_str = ref_match.group(2)
+        all_boxes = box_pattern.findall(boxes_str)  # list of (x1, y1, x2, y2) str tuples
+
+        # Skip the first box (PBD aggregate) when multiple instances are present
+        instance_boxes = all_boxes[1:] if len(all_boxes) > 1 else all_boxes
+
+        for x1, y1, x2, y2 in instance_boxes:
+            detections.append(Detection(
+                label=label,
+                x1=round(int(x1) * scale_x),
+                y1=round(int(y1) * scale_y),
+                x2=round(int(x2) * scale_x),
+                y2=round(int(y2) * scale_y),
+            ))
+
     return detections
