@@ -270,41 +270,88 @@ def apply_ocr(frame: np.ndarray, params: dict) -> np.ndarray:
     return annotated_frame
 
 
+def apply_locate_anything(frame: np.ndarray, params: dict) -> np.ndarray:
+    """
+    Render cached LocateAnything-3B detections on the frame using OpenCV.
+
+    Does NOT run inference. Reads detections stored by ImageProcessor.set_detections().
+    Detections are computed on a snapshot frame and persist across subsequent frames
+    until cleared or replaced — expected behavior for static UI grounding.
+    """
+    bgr         = _to_bgr(frame)
+    detections  = params.get("_detections", [])
+    if not detections:
+        return bgr
+
+    result       = bgr.copy()
+    box_color    = params.get("la_box_color", (68, 255, 68))
+    box_thick    = params.get("la_box_thickness", 2)
+    font_scale   = params.get("la_font_scale", 0.5)
+    font_thick   = params.get("la_font_thickness", 1)
+    show_labels  = params.get("la_show_labels", True)
+    show_center  = params.get("la_show_center", True)
+
+    for i, det in enumerate(detections):
+        cv2.rectangle(result, (det.x1, det.y1), (det.x2, det.y2), box_color, box_thick)
+
+        if show_labels:
+            text   = f"[{i + 1}] {det.label}"
+            origin = (det.x1, max(det.y1 - 6, 12))
+            (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
+            cv2.rectangle(
+                result,
+                (origin[0] - 1, origin[1] - th - bl),
+                (origin[0] + tw + 1, origin[1] + bl),
+                box_color, cv2.FILLED,
+            )
+            cv2.putText(
+                result, text, origin,
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), font_thick, cv2.LINE_AA,
+            )
+
+        if show_center:
+            cx, cy = det.center
+            cv2.circle(result, (cx, cy), 4, box_color, cv2.FILLED)
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Registry: maps filter name -> function
 # ---------------------------------------------------------------------------
 FILTER_REGISTRY = {
-    "normal":         apply_normal,
-    "grayscale":      apply_grayscale,
-    "canny":          apply_canny,
-    "mirror":         apply_mirror,
-    "symmetry":       apply_symmetry,
-    "rgb_mixer":      apply_rgb_mixer,
-    "binary":         apply_binary,
-    "pixelated":      apply_pixelated,
-    "colorblind":     apply_colorblind,
-    "object_counter": apply_object_counter,
-    "smart_inverter": apply_smart_inverter,
-    "yolo":           apply_yolo,
-    "ocr":            apply_ocr,
+    "normal":           apply_normal,
+    "grayscale":        apply_grayscale,
+    "canny":            apply_canny,
+    "mirror":           apply_mirror,
+    "symmetry":         apply_symmetry,
+    "rgb_mixer":        apply_rgb_mixer,
+    "binary":           apply_binary,
+    "pixelated":        apply_pixelated,
+    "colorblind":       apply_colorblind,
+    "object_counter":   apply_object_counter,
+    "smart_inverter":   apply_smart_inverter,
+    "yolo":             apply_yolo,
+    "ocr":              apply_ocr,
+    "locate_anything":  apply_locate_anything,
 }
 
 # Human-readable display names
 FILTER_DISPLAY_NAMES = {
-    "normal":         "Normal",
-    "grayscale":      "Grayscale",
-    "canny":          "Canny Edges",
-    "mirror":         "Mirror",
-    "symmetry":       "Symmetry",
-    "rgb_mixer":      "RGB Mixer",
-    "binary":         "Binary",
-    "pixelated":      "Pixelated",
-    "colorblind":     "Colorblind Sim.",
-    "object_counter": "Object Counter",
-    "smart_inverter": "Smart Inverter",
-    "yolo":           "YOLO Object Detection",
-    "ocr":            "EasyOCR Text Recognition",
+    "normal":           "Normal",
+    "grayscale":        "Grayscale",
+    "canny":            "Canny Edges",
+    "mirror":           "Mirror",
+    "symmetry":         "Symmetry",
+    "rgb_mixer":        "RGB Mixer",
+    "binary":           "Binary",
+    "pixelated":        "Pixelated",
+    "colorblind":       "Colorblind Sim.",
+    "object_counter":   "Object Counter",
+    "smart_inverter":   "Smart Inverter",
+    "yolo":             "YOLO Object Detection",
+    "ocr":              "EasyOCR Text Recognition",
+    "locate_anything":  "Nvidia LocateAnything",
 }
 
 
@@ -361,6 +408,22 @@ class ImageProcessor:
         self.all_params[filter_name].update(params)
         # Also propagate special keys to filter_params for legacy compat
         self.filter_params.update(params)
+
+    # ------------------------------------------------------------------
+    # LocateAnything detection cache
+    # ------------------------------------------------------------------
+
+    def set_detections(self, detections: list) -> None:
+        """Store LocateAnything detections for the filter to render.
+
+        Stored separately from UI params to distinguish user-configurable
+        settings from internal inference state.
+        """
+        self.all_params.setdefault("locate_anything", {})["_detections"] = detections
+
+    def get_detections(self) -> list:
+        """Return the currently cached LocateAnything detections."""
+        return self.all_params.get("locate_anything", {}).get("_detections", [])
 
     # ------------------------------------------------------------------
     # Legacy API (kept for backward compat with main.py connections)

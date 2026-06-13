@@ -1,4 +1,5 @@
 import sys
+import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
@@ -25,6 +26,31 @@ class OcrTranslationWorker(QThread):
         self.translation_finished.emit(original, translated, error)
 
 
+class LocateAnythingWorker(QThread):
+    locate_finished = pyqtSignal(list)
+    locate_failed   = pyqtSignal(str)
+
+    def __init__(self, frame: np.ndarray, prompt: str):
+        super().__init__()
+        self.frame  = frame
+        self.prompt = prompt
+
+    def run(self):
+        try:
+            from core.locate_anything_wrapper import get_locate_anything_model, run_inference
+            processor, model = get_locate_anything_model()
+            detections = run_inference(processor, model, self.frame, self.prompt)
+            self.locate_finished.emit(detections)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "out of memory" in msg or "cuda" in type(exc).__name__.lower():
+                self.locate_failed.emit(
+                    "GPU out of memory. Close other GPU applications and try again."
+                )
+            else:
+                self.locate_failed.emit(str(exc))
+
+
 class GlassCV:
     def __init__(self):
         # 1. Enable DPI Awareness before creating QApplication
@@ -48,6 +74,10 @@ class GlassCV:
         self.control = ControlWindow()
         self.ocr_text_window = OcrTextWindow()
         self.translation_worker = None
+
+        # LocateAnything worker and latest captured frame
+        self._locate_worker: LocateAnythingWorker | None = None
+        self._last_frame:    np.ndarray | None           = None
         
         # 4. Connect Signals
         self._connect_signals()
@@ -63,7 +93,6 @@ class GlassCV:
         self.glass.geometry_changed.connect(self.control.update_glass_size)
         
         # --- Capture Thread -> UI ---
-        # The thread emits a numpy array (processed frame)
         self.capture_thread.frame_ready.connect(self._on_frame_ready)
         self.capture_thread.ocr_text_ready.connect(self._on_ocr_text_ready)
         self.control.translate_requested.connect(self._on_translate_requested)
@@ -91,14 +120,19 @@ class GlassCV:
         self.control.toggle_template_glass.connect(self._toggle_template_glass)
         self.control.request_template_capture.connect(self._capture_template)
 
+        # --- Control Window -> LocateAnything ---
+        self.control.locate_requested.connect(self._on_locate_requested)
+        self.control.locate_cleared.connect(self._on_locate_cleared)
+
     def _set_continuous_mode(self, continuous: bool):
         self.capture_thread.continuous_mode = continuous
 
     def _on_frame_ready(self, frame_np):
-        # Convert from numpy array to QImage
+        # Store the latest frame for on-demand LocateAnything inference
+        self._last_frame = frame_np
+
         qimg = cv2_to_qimage(frame_np)
         if not qimg.isNull():
-            # Update both windows
             self.control.update_image(qimg)
             self.glass.update_image(qimg)
 
@@ -140,9 +174,48 @@ class GlassCV:
             self.ocr_text_window.update_texts("", None)
             self.ocr_text_window.hide()
 
+        # Clear stale detections when the filter is removed from the chain
+        has_locate = any(entry.get("name") == "locate_anything" for entry in chain)
+        if not has_locate:
+            self.processor.set_detections([])
+
+    # ------------------------------------------------------------------
+    # LocateAnything handlers
+    # ------------------------------------------------------------------
+
+    def _on_locate_requested(self, prompt: str):
+        # Guard: ignore if a worker is already running
+        if self._locate_worker is not None:
+            return
+        if self._last_frame is None:
+            self.control.on_locate_failed("No frame available yet.")
+            return
+
+        worker = LocateAnythingWorker(self._last_frame.copy(), prompt)
+        worker.locate_finished.connect(self._on_locate_finished)
+        worker.locate_failed.connect(self._on_locate_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._clear_locate_worker)
+        self._locate_worker = worker
+        worker.start()
+
+    def _on_locate_finished(self, detections: list):
+        self.processor.set_detections(detections)
+        self.control.on_locate_finished()
+
+    def _on_locate_failed(self, error_msg: str):
+        self.control.on_locate_failed(error_msg)
+
+    def _on_locate_cleared(self):
+        self.processor.set_detections([])
+
+    def _clear_locate_worker(self):
+        self._locate_worker = None
+
+    # ------------------------------------------------------------------
+
     def run(self):
         exit_code = self.app.exec()
-        # Ensure thread is closed on exit
         self.capture_thread.stop()
         sys.exit(exit_code)
 
@@ -154,7 +227,6 @@ class GlassCV:
 
     def _capture_template(self):
         import mss
-        import numpy as np
         g = self.template_glass.geometry()
         bw = self.template_glass.border_width
         
